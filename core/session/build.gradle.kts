@@ -1,3 +1,18 @@
 plugins {
     id("secrt.kmp-library")
 }
+
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            api(projects.core.storage)
+        }
+        commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.okio.fakefilesystem)
+        }
+        jvmTest.dependencies {
+            implementation(libs.sqldelight.jvm.driver)
+        }
+    }
+}
