@@ -17,6 +17,8 @@ dependencyResolutionManagement {
 
 rootProject.name = "secrt"
 
+enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+
 include(
     ":core:model",
     ":core:crypto",
