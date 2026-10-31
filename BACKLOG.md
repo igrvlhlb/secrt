@@ -6,9 +6,9 @@ Pending work, grouped by area. The architecture and the reasoning behind it live
 Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Milestone 1 — local-only Android app (current)
-- [~] Platform-independent core: model, crypto, vault, merge engine, storage, session
-- [ ] Android specifics: SQLCipher driver, file locations, app wiring
-- [ ] Compose UI: setup/unlock, journal, folders, labels, editor, settings
+- [x] Platform-independent core: model, crypto, vault, merge engine, storage, session
+- [x] Android specifics: SQLCipher driver, file locations, app wiring
+- [x] Compose UI: setup/unlock, journal, folders, labels, editor, settings
 
 ## Sync & devices
 - [ ] LAN pairing via QR: **desktop generates the QR**, phone scans it (deferred on purpose)
@@ -17,8 +17,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] mDNS discovery of already-paired devices (Android NsdManager, iOS Network.framework, desktop JmDNS)
 - [ ] Sync protocol over the channel (exchange version vectors, then missing revisions)
 - [ ] Peer table: paired devices, names, identity keys, last-seen version vectors
-- [ ] Bump the "shared seq" watermark on every outbound transfer (sync, backup, export), so local
-      revisions are no longer amended in place once they leave the device
+- [x] "Shared seq" watermark: `DiaryStore.revisionsSince` marks what it returns as shared, so
+      revisions that left the device are never amended in place. New transports must export through it.
 - [ ] Conflict resolution UI: side-by-side versions, pick one or merge by hand (data layer is done)
 - [ ] Entry history UI (revisions are already kept)
 
@@ -44,6 +44,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] Screenshot protection toggle (FLAG_SECURE is always on for now)
 
 ## Editor & content
+- [ ] Open/share non-image attachments (decrypt to a temp file + FileProvider); today only images can be viewed
+- [ ] Downsample image thumbnails (today the full image is decoded)
 - [ ] Inline images in Markdown (`![](attachment://<id>)`) rendered from encrypted blobs
 - [ ] Streamed (chunked) encryption for large attachments; today a file is encrypted in memory (20 MB cap)
 - [ ] Garbage-collect blobs no longer referenced by any revision
@@ -53,6 +55,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] Entry templates / daily prompt
 
 ## Engineering
+- [ ] Localization (strings are hard-coded in English)
+- [ ] UI tests (Compose) and an on-device test that the SQLCipher file holds no plaintext
 - [ ] CI (build + `allTests`)
 - [ ] Release build: R8 rules for JNA/libsodium and SQLCipher, signing
 - [ ] Database schema migrations policy (SQLDelight `.sqm` files) before the first public build
