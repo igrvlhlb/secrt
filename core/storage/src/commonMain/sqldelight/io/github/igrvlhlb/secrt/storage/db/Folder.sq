@@ -1,0 +1,27 @@
+-- Current state of each folder. Deleted folders are kept so their contents can move up a level.
+CREATE TABLE folder (
+    id TEXT NOT NULL PRIMARY KEY,
+    -- Parent as stored in the folder's payload.
+    parent_id TEXT,
+    -- Parent it is shown under, after resolving deleted parents and move cycles.
+    effective_parent_id TEXT,
+    name TEXT NOT NULL,
+    deleted INTEGER NOT NULL,
+    hlc TEXT NOT NULL
+);
+
+upsert:
+INSERT OR REPLACE INTO folder(id, parent_id, effective_parent_id, name, deleted, hlc)
+VALUES (?, ?, ?, ?, ?, ?);
+
+all:
+SELECT * FROM folder;
+
+live:
+SELECT * FROM folder WHERE deleted = 0 ORDER BY name COLLATE NOCASE;
+
+byId:
+SELECT * FROM folder WHERE id = ?;
+
+setEffectiveParent:
+UPDATE folder SET effective_parent_id = ? WHERE id = ?;

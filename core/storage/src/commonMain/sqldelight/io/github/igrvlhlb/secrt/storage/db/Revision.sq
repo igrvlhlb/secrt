@@ -1,0 +1,60 @@
+-- Append-only history of every record: the source of truth. All other tables are derived from it.
+CREATE TABLE revision (
+    rev_id TEXT NOT NULL PRIMARY KEY,
+    record_type TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    hlc TEXT NOT NULL,
+    deleted INTEGER NOT NULL,
+    payload TEXT
+);
+
+CREATE INDEX revision_record ON revision(record_type, record_id);
+CREATE UNIQUE INDEX revision_device_seq ON revision(device_id, seq);
+
+CREATE TABLE revision_parent (
+    rev_id TEXT NOT NULL,
+    parent_rev_id TEXT NOT NULL,
+    PRIMARY KEY (rev_id, parent_rev_id)
+);
+
+insert:
+INSERT OR IGNORE INTO revision(rev_id, record_type, record_id, device_id, seq, hlc, deleted, payload)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+
+insertParent:
+INSERT OR IGNORE INTO revision_parent(rev_id, parent_rev_id) VALUES (?, ?);
+
+-- Rewrites a revision that never left this device (see DiaryStore.commit).
+amend:
+UPDATE revision SET hlc = ?, payload = ? WHERE rev_id = ?;
+
+exists:
+SELECT count(*) FROM revision WHERE rev_id = ?;
+
+forRecord:
+SELECT * FROM revision WHERE record_type = ? AND record_id = ?;
+
+parentsForRecord:
+SELECT p.rev_id, p.parent_rev_id
+FROM revision_parent p JOIN revision r ON r.rev_id = p.rev_id
+WHERE r.record_type = ? AND r.record_id = ?;
+
+parentsOf:
+SELECT parent_rev_id FROM revision_parent WHERE rev_id = ?;
+
+maxSeq:
+SELECT MAX(seq) FROM revision WHERE device_id = ?;
+
+maxHlc:
+SELECT MAX(hlc) FROM revision;
+
+versionVector:
+SELECT device_id, MAX(seq) FROM revision GROUP BY device_id;
+
+since:
+SELECT * FROM revision WHERE device_id = ? AND seq > ? ORDER BY seq;
+
+devices:
+SELECT DISTINCT device_id FROM revision;

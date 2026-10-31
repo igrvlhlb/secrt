@@ -1,0 +1,15 @@
+CREATE TABLE label (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    color INTEGER NOT NULL,
+    deleted INTEGER NOT NULL
+);
+
+upsert:
+INSERT OR REPLACE INTO label(id, name, color, deleted) VALUES (?, ?, ?, ?);
+
+live:
+SELECT * FROM label WHERE deleted = 0 ORDER BY name COLLATE NOCASE;
+
+byId:
+SELECT * FROM label WHERE id = ?;

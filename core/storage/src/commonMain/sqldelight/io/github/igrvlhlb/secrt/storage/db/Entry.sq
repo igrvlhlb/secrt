@@ -1,0 +1,90 @@
+-- Current state of each live entry, derived from its revisions.
+CREATE TABLE entry (
+    id TEXT NOT NULL PRIMARY KEY,
+    -- Folder as stored in the entry's payload.
+    folder_id TEXT,
+    -- Folder it is shown in, after resolving deleted or unknown folders.
+    effective_folder_id TEXT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    diary_date TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    conflict TEXT
+);
+
+CREATE INDEX entry_date ON entry(diary_date);
+CREATE INDEX entry_folder ON entry(effective_folder_id);
+
+CREATE TABLE entry_label (
+    entry_id TEXT NOT NULL,
+    label_id TEXT NOT NULL,
+    PRIMARY KEY (entry_id, label_id)
+);
+
+CREATE INDEX entry_label_label ON entry_label(label_id);
+
+CREATE TABLE entry_attachment (
+    entry_id TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    blob_id TEXT NOT NULL,
+    file_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    PRIMARY KEY (entry_id, position)
+);
+
+upsert:
+INSERT OR REPLACE INTO entry(id, folder_id, effective_folder_id, title, body, diary_date, created_at, updated_at, conflict)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+delete:
+DELETE FROM entry WHERE id = ?;
+
+deleteLabels:
+DELETE FROM entry_label WHERE entry_id = ?;
+
+insertLabel:
+INSERT OR IGNORE INTO entry_label(entry_id, label_id) VALUES (?, ?);
+
+deleteAttachments:
+DELETE FROM entry_attachment WHERE entry_id = ?;
+
+insertAttachment:
+INSERT INTO entry_attachment(entry_id, position, blob_id, file_name, mime_type, size)
+VALUES (?, ?, ?, ?, ?, ?);
+
+byId:
+SELECT * FROM entry WHERE id = ?;
+
+labelsOf:
+SELECT l.id, l.name, l.color
+FROM entry_label el JOIN label l ON l.id = el.label_id
+WHERE el.entry_id = ? AND l.deleted = 0
+ORDER BY l.name COLLATE NOCASE;
+
+attachmentsOf:
+SELECT * FROM entry_attachment WHERE entry_id = ? ORDER BY position;
+
+-- :allFolders = 1 ignores :folderKey; otherwise '' selects the root.
+-- :pattern is a LIKE pattern with '\' as escape character.
+summaries:
+SELECT e.id, e.title, substr(e.body, 1, 300) AS preview, e.diary_date, e.effective_folder_id, e.updated_at, e.conflict,
+       (SELECT count(*) FROM entry_attachment a WHERE a.entry_id = e.id) AS attachment_count
+FROM entry e
+WHERE (:allFolders = 1 OR coalesce(e.effective_folder_id, '') = :folderKey)
+  AND (:labelId IS NULL OR EXISTS (SELECT 1 FROM entry_label el WHERE el.entry_id = e.id AND el.label_id = :labelId))
+  AND (:pattern IS NULL OR e.title LIKE :pattern ESCAPE '\' OR e.body LIKE :pattern ESCAPE '\')
+ORDER BY e.diary_date DESC, e.created_at DESC;
+
+allEntryLabels:
+SELECT el.entry_id, l.id, l.name, l.color
+FROM entry_label el JOIN label l ON l.id = el.label_id
+WHERE l.deleted = 0
+ORDER BY l.name COLLATE NOCASE;
+
+distinctFolderIds:
+SELECT DISTINCT folder_id FROM entry WHERE folder_id IS NOT NULL;
+
+setEffectiveFolder:
+UPDATE entry SET effective_folder_id = ? WHERE folder_id = ?;
