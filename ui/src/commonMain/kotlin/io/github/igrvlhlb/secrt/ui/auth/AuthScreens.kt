@@ -1,0 +1,284 @@
+package io.github.igrvlhlb.secrt.ui.auth
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
+import kotlinx.coroutines.launch
+
+const val MIN_PASSWORD_LENGTH = 8
+
+/** Centered, scrollable column used by every screen shown before the diary is open. */
+@Composable
+private fun AuthLayout(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, content: @Composable () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Column(Modifier.widthIn(max = 420.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
+            Text(title, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+fun PasswordField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+    imeAction: ImeAction = ImeAction.Next,
+    onDone: () -> Unit = {},
+) {
+    var visible by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        singleLine = true,
+        isError = isError,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = imeAction, autoCorrectEnabled = false),
+        keyboardActions = KeyboardActions(onDone = { onDone() }),
+        trailingIcon = {
+            IconButton(onClick = { visible = !visible }) {
+                Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (visible) "Hide" else "Show")
+            }
+        },
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun BusyButton(text: String, busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Button(onClick = onClick, enabled = enabled && !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Text(text)
+    }
+}
+
+/** New password + confirmation, with validation. Shared by first setup and password resets. */
+@Composable
+private fun NewPasswordForm(buttonText: String, busy: Boolean, extra: @Composable () -> Unit = {}, onSubmit: (String) -> Unit) {
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    val tooShort = password.isNotEmpty() && password.length < MIN_PASSWORD_LENGTH
+    val mismatch = confirmation.isNotEmpty() && confirmation != password
+    val valid = password.length >= MIN_PASSWORD_LENGTH && password == confirmation
+
+    PasswordField(password, { password = it }, "Password", isError = tooShort)
+    if (tooShort) Text("At least $MIN_PASSWORD_LENGTH characters", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    PasswordField(confirmation, { confirmation = it }, "Repeat password", isError = mismatch, imeAction = ImeAction.Done, onDone = { if (valid) onSubmit(password) })
+    if (mismatch) Text("Passwords don't match", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    extra()
+    BusyButton(buttonText, busy, valid) { onSubmit(password) }
+}
+
+@Composable
+fun SetupScreen(onCreate: suspend (password: String, withRecoveryKey: Boolean) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var withRecoveryKey by remember { mutableStateOf(true) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AuthLayout(
+        Icons.Outlined.Lock,
+        "Welcome to secrt",
+        "Your diary is encrypted and stays on this device. Choose a password to protect it. " +
+            "We can't recover it for you, so make it memorable.",
+    ) {
+        NewPasswordForm(
+            buttonText = "Create diary",
+            busy = busy,
+            extra = {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Checkbox(checked = withRecoveryKey, onCheckedChange = { withRecoveryKey = it })
+                    Column {
+                        Text("Create a recovery key (recommended)")
+                        Text(
+                            "A code you write down to get back in if you forget the password.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            },
+        ) { password ->
+            busy = true
+            error = null
+            scope.launch {
+                try {
+                    onCreate(password, withRecoveryKey)
+                } catch (e: Exception) {
+                    error = e.message ?: "Couldn't create the diary"
+                } finally {
+                    busy = false
+                }
+            }
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
+
+@Composable
+fun UnlockScreen(
+    onUnlock: suspend (password: String) -> Unit,
+    onUnlockWithRecoveryKey: suspend (recoveryKey: String) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var useRecoveryKey by remember { mutableStateOf(false) }
+    var secret by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun submit() {
+        if (secret.isEmpty() || busy) return
+        busy = true
+        error = null
+        scope.launch {
+            try {
+                if (useRecoveryKey) onUnlockWithRecoveryKey(secret) else onUnlock(secret)
+            } catch (e: InvalidCredentialsException) {
+                error = if (useRecoveryKey) "That recovery key doesn't match" else "Wrong password"
+            } catch (e: Exception) {
+                error = e.message ?: "Couldn't open the diary"
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    AuthLayout(
+        if (useRecoveryKey) Icons.Outlined.Key else Icons.Outlined.Lock,
+        "Diary locked",
+        if (useRecoveryKey) "Enter the recovery key you saved when you created the diary." else "Enter your password to open your diary.",
+    ) {
+        if (useRecoveryKey) {
+            OutlinedTextField(
+                value = secret,
+                onValueChange = { secret = it },
+                label = { Text("Recovery key") },
+                placeholder = { Text("XXXX-XXXX-…") },
+                isError = error != null,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { submit() }),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            PasswordField(secret, { secret = it }, "Password", isError = error != null, imeAction = ImeAction.Done, onDone = ::submit)
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        BusyButton("Unlock", busy, secret.isNotEmpty(), ::submit)
+        TextButton(onClick = { useRecoveryKey = !useRecoveryKey; secret = ""; error = null }) {
+            Text(if (useRecoveryKey) "Use password instead" else "Forgot password? Use recovery key")
+        }
+    }
+}
+
+/** Shows a recovery key once, and only continues after the user confirms they saved it. */
+@Composable
+fun RecoveryKeyScreen(recoveryKey: String, onDone: () -> Unit) {
+    var saved by remember { mutableStateOf(false) }
+    AuthLayout(
+        Icons.Outlined.Key,
+        "Your recovery key",
+        "Write this down and keep it somewhere safe, away from your phone. It opens your diary if you " +
+            "forget your password. It won't be shown again.",
+    ) {
+        RecoveryKeyCard(recoveryKey)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Checkbox(checked = saved, onCheckedChange = { saved = it })
+            Text("I've written it down")
+        }
+        Button(onClick = onDone, enabled = saved, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Continue") }
+    }
+}
+
+@Composable
+fun RecoveryKeyCard(recoveryKey: String) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer), modifier = Modifier.fillMaxWidth()) {
+        SelectionContainer {
+            Text(
+                recoveryKey.split('-').chunked(4).joinToString("\n") { it.joinToString("-") },
+                style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(20.dp),
+            )
+        }
+    }
+}
+
+/** After unlocking with the recovery key, the user must choose a new password. */
+@Composable
+fun NewPasswordScreen(onSetPassword: suspend (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    AuthLayout(Icons.Outlined.Lock, "Choose a new password", "You opened the diary with your recovery key. Pick a new password to keep using it.") {
+        NewPasswordForm("Save password", busy) { password ->
+            busy = true
+            scope.launch {
+                try {
+                    onSetPassword(password)
+                } catch (e: Exception) {
+                    error = e.message ?: "Couldn't change the password"
+                } finally {
+                    busy = false
+                }
+            }
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    }
+}
