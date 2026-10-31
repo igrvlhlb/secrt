@@ -1,0 +1,1 @@
+- Do not add co-authoring message to AI-made commits
