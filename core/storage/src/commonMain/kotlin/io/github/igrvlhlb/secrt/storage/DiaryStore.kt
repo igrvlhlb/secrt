@@ -194,18 +194,24 @@ class DiaryStore private constructor(
         revisions
     }
 
-    /** Merges revisions received from another replica. Already-known revisions are ignored. */
-    suspend fun applyRemote(revisions: Collection<Revision>) = write {
-        db.transaction {
+    /**
+     * Merges revisions received from another replica. Already-known revisions are ignored.
+     * @return how many revisions were new.
+     */
+    suspend fun applyRemote(revisions: Collection<Revision>): Int = write {
+        db.transactionWithResult {
             val touched = LinkedHashSet<Pair<RecordType, String>>()
+            var added = 0
             for (revision in revisions) {
                 if (db.revisionQueries.exists(revision.id).executeAsOne() > 0) continue
                 insertRevision(revision)
                 clock.observe(revision.hlc)
                 touched += revision.recordType to revision.recordId
+                added++
             }
             // Folders first, so entries are placed against the updated tree.
             touched.sortedBy { it.first != RecordType.FOLDER }.forEach { (type, id) -> materialize(type, id) }
+            added
         }
     }
 

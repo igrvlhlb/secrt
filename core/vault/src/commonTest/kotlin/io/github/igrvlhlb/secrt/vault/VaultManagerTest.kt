@@ -91,6 +91,24 @@ class VaultManagerTest {
     }
 
     @Test
+    fun externalHeaderUnlocksAndInstallsElsewhere() = runTest {
+        val source = manager()
+        val (created, recoveryKey) = source.create("pw", withRecoveryKey = true)
+        val header = source.headerJson()
+        val target = VaultManager(fileSystem, "/other".toPath(), SodiumCrypto.create(), Argon2Params.Insecure)
+
+        assertFailsWith<InvalidCredentialsException> { target.unlockExternal(header, Credential.Password("nope")) }
+        assertFailsWith<InvalidVaultHeaderException> { target.unlockExternal("{ not json", Credential.Password("pw")) }
+        assertContentEquals(created.archiveKey, target.unlockExternal(header, Credential.RecoveryKey(recoveryKey!!)).archiveKey)
+        assertFalse(target.exists())
+
+        target.install(header)
+        assertContentEquals(created.databaseKey, target.unlock("pw").databaseKey)
+        target.delete()
+        assertFalse(target.exists())
+    }
+
+    @Test
     fun recoveryKeyEncodingRoundTrips() = runTest {
         val bytes = SodiumCrypto.create().randomBytes(RecoveryKey.BYTES)
         val text = RecoveryKey.encode(bytes)

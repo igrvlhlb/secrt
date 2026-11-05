@@ -14,6 +14,15 @@ import okio.Path
 
 class InvalidCredentialsException : Exception("Wrong password or recovery key")
 
+class InvalidVaultHeaderException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/** Something that opens a vault. */
+sealed interface Credential {
+    data class Password(val password: String) : Credential
+
+    data class RecoveryKey(val recoveryKey: String) : Credential
+}
+
 /**
  * Creates and unlocks the vault: a random data key, wrapped LUKS-style by a password slot and
  * an optional recovery-key slot, stored in `vault.key` inside [directory].
@@ -51,23 +60,48 @@ class VaultManager(
     }
 
     /** @throws InvalidCredentialsException */
-    fun unlock(password: String): VaultKeys {
-        val header = readHeader()
-        for (slot in header.slots.filterIsInstance<KeySlot.Password>()) {
-            val params = Argon2Params(slot.opsLimit, slot.memLimitBytes)
-            val kek = crypto.argon2id(password, slot.salt.decodeBase64(), params)
-            unwrap(header.vaultId, slot, kek)?.let { return VaultKeys(header.vaultId, crypto, it) }
-        }
-        throw InvalidCredentialsException()
-    }
+    fun unlock(password: String): VaultKeys = unlock(readHeader(), Credential.Password(password))
 
     /** @throws InvalidCredentialsException */
-    fun unlockWithRecoveryKey(recoveryKey: String): VaultKeys {
-        val header = readHeader()
-        val keyBytes = RecoveryKey.decode(recoveryKey) ?: throw InvalidCredentialsException()
-        for (slot in header.slots.filterIsInstance<KeySlot.Recovery>()) {
-            val kek = recoveryKek(keyBytes, slot.salt.decodeBase64())
-            unwrap(header.vaultId, slot, kek)?.let { return VaultKeys(header.vaultId, crypto, it) }
+    fun unlockWithRecoveryKey(recoveryKey: String): VaultKeys = unlock(readHeader(), Credential.RecoveryKey(recoveryKey))
+
+    /**
+     * Unlocks a `vault.key` that isn't installed here, e.g. one read from a backup, without
+     * touching the local vault.
+     *
+     * @throws InvalidCredentialsException
+     * @throws InvalidVaultHeaderException if [headerJson] isn't a vault header this app can read.
+     */
+    fun unlockExternal(headerJson: String, credential: Credential): VaultKeys = unlock(parseHeader(headerJson), credential)
+
+    /** The installed `vault.key`, as stored. Contains no secrets in clear. */
+    fun headerJson(): String = fileSystem.read(headerPath) { readUtf8() }
+
+    /** Installs a `vault.key` (e.g. from a backup), replacing any existing one. */
+    fun install(headerJson: String) {
+        parseHeader(headerJson)
+        fileSystem.createDirectories(directory)
+        writeHeaderText(headerJson)
+    }
+
+    fun delete() {
+        fileSystem.delete(headerPath, mustExist = false)
+    }
+
+    private fun unlock(header: VaultHeader, credential: Credential): VaultKeys {
+        when (credential) {
+            is Credential.Password -> for (slot in header.slots.filterIsInstance<KeySlot.Password>()) {
+                val params = Argon2Params(slot.opsLimit, slot.memLimitBytes)
+                val kek = crypto.argon2id(credential.password, slot.salt.decodeBase64(), params)
+                unwrap(header.vaultId, slot, kek)?.let { return VaultKeys(header.vaultId, crypto, it) }
+            }
+            is Credential.RecoveryKey -> {
+                val keyBytes = RecoveryKey.decode(credential.recoveryKey) ?: throw InvalidCredentialsException()
+                for (slot in header.slots.filterIsInstance<KeySlot.Recovery>()) {
+                    val kek = recoveryKek(keyBytes, slot.salt.decodeBase64())
+                    unwrap(header.vaultId, slot, kek)?.let { return VaultKeys(header.vaultId, crypto, it) }
+                }
+            }
         }
         throw InvalidCredentialsException()
     }
@@ -132,16 +166,25 @@ class VaultManager(
 
     private fun slotAad(vaultId: String, slotType: String) = "secrt-slot:$vaultId:$slotType".encodeToByteArray()
 
-    private fun readHeader(): VaultHeader {
-        val text = fileSystem.read(headerPath) { readUtf8() }
-        val header = SecrtJson.decodeFromString<VaultHeader>(text)
-        check(header.format <= VaultHeader.CURRENT_FORMAT) { "Vault format ${header.format} is newer than this app supports" }
+    private fun readHeader(): VaultHeader = parseHeader(headerJson())
+
+    private fun parseHeader(text: String): VaultHeader {
+        val header = try {
+            SecrtJson.decodeFromString<VaultHeader>(text)
+        } catch (e: IllegalArgumentException) {
+            throw InvalidVaultHeaderException("Not a valid vault key file", e)
+        }
+        if (header.format > VaultHeader.CURRENT_FORMAT) {
+            throw InvalidVaultHeaderException("Vault format ${header.format} is newer than this app supports")
+        }
         return header
     }
 
-    private fun writeHeader(header: VaultHeader) {
+    private fun writeHeader(header: VaultHeader) = writeHeaderText(SecrtJson.encodeToString(header))
+
+    private fun writeHeaderText(text: String) {
         val temp = directory / "vault.key.tmp"
-        fileSystem.write(temp) { writeUtf8(SecrtJson.encodeToString(header)) }
+        fileSystem.write(temp) { writeUtf8(text) }
         fileSystem.atomicMove(temp, headerPath)
     }
 

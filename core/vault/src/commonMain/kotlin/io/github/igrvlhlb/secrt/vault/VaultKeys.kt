@@ -21,7 +21,10 @@ class VaultKeys internal constructor(
     /** Keyed hash that names blobs, so file names don't reveal which attachments are identical across vaults. */
     val blobIdKey: ByteArray = crypto.deriveSubkey(dataKey, 3, "secrtbid")
 
+    /** Encrypts revision segments in backups and exports. */
+    val archiveKey: ByteArray = crypto.deriveSubkey(dataKey, 4, "secrtarc")
+
     override fun close() {
-        listOf(dataKey, databaseKey, blobKey, blobIdKey).forEach(crypto::wipe)
+        listOf(dataKey, databaseKey, blobKey, blobIdKey, archiveKey).forEach(crypto::wipe)
     }
 }

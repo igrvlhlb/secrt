@@ -25,6 +25,7 @@ include(
     ":core:vault",
     ":core:sync",
     ":core:storage",
+    ":core:archive",
     ":core:session",
     ":ui",
     ":app:android",

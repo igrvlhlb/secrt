@@ -26,7 +26,7 @@ class SqlCipherDriverFactory(
         )
     }
 
-    fun deleteDatabase() {
+    override fun delete() {
         context.deleteDatabase(databaseName)
     }
 
