@@ -28,12 +28,16 @@ import io.github.igrvlhlb.secrt.session.SessionState
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.ui.auth.NewPasswordScreen
 import io.github.igrvlhlb.secrt.ui.auth.RecoveryKeyScreen
+import io.github.igrvlhlb.secrt.ui.auth.RestoreScreen
 import io.github.igrvlhlb.secrt.ui.auth.SetupScreen
 import io.github.igrvlhlb.secrt.ui.auth.UnlockScreen
 import io.github.igrvlhlb.secrt.ui.editor.EditorScreen
 import io.github.igrvlhlb.secrt.ui.editor.EditorViewModel
 import io.github.igrvlhlb.secrt.ui.home.HomeScreen
+import io.github.igrvlhlb.secrt.ui.platform.PickedDocument
+import io.github.igrvlhlb.secrt.ui.platform.rememberOpenDocument
 import io.github.igrvlhlb.secrt.ui.theme.SecrtTheme
+import io.github.igrvlhlb.secrt.vault.Credential
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.Serializable
 
@@ -52,29 +56,46 @@ fun SecrtApp(session: AppSession, backgroundScope: CoroutineScope) {
             val unlockedScope = viewModel { UnlockedViewModelScope() }
             var creating by remember { mutableStateOf(false) }
             var pendingRecoveryKey by remember { mutableStateOf<String?>(null) }
+            var backupToRestore by remember { mutableStateOf<PickedDocument?>(null) }
+            val pickBackup = rememberOpenDocument { backupToRestore = it }
 
             AutoLockEffect(session, autoLock)
             // Everything opened while unlocked (ViewModels holding diary content) goes away on lock.
             LaunchedEffect(state) { if (state !is SessionState.Unlocked) unlockedScope.clear() }
 
             when (val s = state) {
-                SessionState.NoVault -> SetupScreen { password, withRecoveryKey ->
-                    creating = true
-                    try {
-                        pendingRecoveryKey = session.create(password, withRecoveryKey)
-                    } finally {
-                        creating = false
+                SessionState.NoVault -> when (val backup = backupToRestore) {
+                    null -> SetupScreen(
+                        onCreate = { password, withRecoveryKey ->
+                            creating = true
+                            try {
+                                pendingRecoveryKey = session.create(password, withRecoveryKey)
+                            } finally {
+                                creating = false
+                            }
+                        },
+                        onRestore = pickBackup,
+                    )
+                    else -> RestoreScreen(
+                        fileName = backup.name,
+                        onRestore = { credential ->
+                            session.restore(backup.openSource(), credential)
+                            backupToRestore = null
+                        },
+                        onCancel = { backupToRestore = null },
+                    )
+                }
+                SessionState.Locked -> UnlockScreen { credential ->
+                    when (credential) {
+                        is Credential.Password -> session.unlock(credential.password)
+                        is Credential.RecoveryKey -> session.unlockWithRecoveryKey(credential.recoveryKey)
                     }
                 }
-                SessionState.Locked -> UnlockScreen(
-                    onUnlock = { session.unlock(it) },
-                    onUnlockWithRecoveryKey = { session.unlockWithRecoveryKey(it) },
-                )
                 is SessionState.Unlocked -> when {
                     creating -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                     pendingRecoveryKey != null -> RecoveryKeyScreen(pendingRecoveryKey!!) { pendingRecoveryKey = null }
                     s.viaRecoveryKey -> NewPasswordScreen { session.changePassword(currentPassword = null, newPassword = it) }
-                    else -> CompositionLocalProvider(LocalViewModelStoreOwner provides unlockedScope) {
+                    else -> CompositionLocalProvider(LocalViewModelStoreOwner provides unlockedScope, LocalAutoLock provides autoLock) {
                         DiaryNavigation(s.store, session, autoLock, backgroundScope)
                     }
                 }

@@ -23,12 +23,15 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] Entry history UI (revisions are already kept)
 
 ## Backup & export
-- [ ] `.secrt` encrypted archive export/import (vault.key + revision segments + blobs)
+- [x] `.secrt` encrypted archive export/import (vault.key + revision segments + blobs)
 - [ ] Plaintext Markdown export (zip, YAML front-matter, `_attachments/`); requires re-entering the password
 - [ ] `BackupTarget` interface + WebDAV implementation (home servers, Nextcloud)
 - [ ] Google Drive `appDataFolder` target
 - [ ] OneDrive, Dropbox, S3-compatible targets
-- [ ] Restore-from-backup flow on the first screen of a fresh install
+- [x] Restore-from-backup flow on the first screen of a fresh install
+- [ ] Import a backup of a *different* diary (re-encrypt its attachments and remap blob ids)
+- [ ] Replace the current diary with a backup (today restore is only offered on first run)
+- [ ] Stream archives instead of holding each entry in memory (fine today: attachments are capped at 20 MB)
 - [ ] Markdown import (from other apps / previous plaintext exports)
 
 ## Platforms

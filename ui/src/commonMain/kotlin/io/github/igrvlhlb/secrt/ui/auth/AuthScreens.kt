@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -20,12 +21,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -48,6 +52,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import io.github.igrvlhlb.secrt.vault.Credential
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
 import kotlinx.coroutines.launch
 
@@ -125,7 +130,7 @@ private fun NewPasswordForm(buttonText: String, busy: Boolean, extra: @Composabl
 }
 
 @Composable
-fun SetupScreen(onCreate: suspend (password: String, withRecoveryKey: Boolean) -> Unit) {
+fun SetupScreen(onCreate: suspend (password: String, withRecoveryKey: Boolean) -> Unit, onRestore: () -> Unit) {
     val scope = rememberCoroutineScope()
     var withRecoveryKey by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
@@ -167,13 +172,49 @@ fun SetupScreen(onCreate: suspend (password: String, withRecoveryKey: Boolean) -
             }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        HorizontalDivider()
+        Text("Already have a diary?", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(onClick = onRestore, enabled = !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+            Icon(Icons.Outlined.Restore, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Restore from a backup file")
+        }
     }
 }
 
 @Composable
-fun UnlockScreen(
-    onUnlock: suspend (password: String) -> Unit,
-    onUnlockWithRecoveryKey: suspend (recoveryKey: String) -> Unit,
+fun UnlockScreen(onUnlock: suspend (Credential) -> Unit) {
+    CredentialScreen(
+        title = "Diary locked",
+        passwordHint = "Enter your password to open your diary.",
+        recoveryHint = "Enter the recovery key you saved when you created the diary.",
+        submitLabel = "Unlock",
+        onSubmit = onUnlock,
+    )
+}
+
+/** Restoring a backup on first run: it opens with the password or recovery key it was made with. */
+@Composable
+fun RestoreScreen(fileName: String, onRestore: suspend (Credential) -> Unit, onCancel: () -> Unit) {
+    CredentialScreen(
+        title = "Restore backup",
+        passwordHint = "$fileName\n\nEnter the password of the diary this backup was made from.",
+        recoveryHint = "$fileName\n\nEnter the recovery key of the diary this backup was made from.",
+        submitLabel = "Restore",
+        onSubmit = onRestore,
+        onCancel = onCancel,
+    )
+}
+
+/** Asks for the password, or the recovery key instead, and reports what went wrong. */
+@Composable
+private fun CredentialScreen(
+    title: String,
+    passwordHint: String,
+    recoveryHint: String,
+    submitLabel: String,
+    onSubmit: suspend (Credential) -> Unit,
+    onCancel: (() -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var useRecoveryKey by remember { mutableStateOf(false) }
@@ -187,22 +228,18 @@ fun UnlockScreen(
         error = null
         scope.launch {
             try {
-                if (useRecoveryKey) onUnlockWithRecoveryKey(secret) else onUnlock(secret)
+                onSubmit(if (useRecoveryKey) Credential.RecoveryKey(secret) else Credential.Password(secret))
             } catch (e: InvalidCredentialsException) {
                 error = if (useRecoveryKey) "That recovery key doesn't match" else "Wrong password"
             } catch (e: Exception) {
-                error = e.message ?: "Couldn't open the diary"
+                error = e.message ?: "Something went wrong"
             } finally {
                 busy = false
             }
         }
     }
 
-    AuthLayout(
-        if (useRecoveryKey) Icons.Outlined.Key else Icons.Outlined.Lock,
-        "Diary locked",
-        if (useRecoveryKey) "Enter the recovery key you saved when you created the diary." else "Enter your password to open your diary.",
-    ) {
+    AuthLayout(if (useRecoveryKey) Icons.Outlined.Key else Icons.Outlined.Lock, title, if (useRecoveryKey) recoveryHint else passwordHint) {
         if (useRecoveryKey) {
             OutlinedTextField(
                 value = secret,
@@ -220,10 +257,11 @@ fun UnlockScreen(
             PasswordField(secret, { secret = it }, "Password", isError = error != null, imeAction = ImeAction.Done, onDone = ::submit)
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        BusyButton("Unlock", busy, secret.isNotEmpty(), ::submit)
+        BusyButton(submitLabel, busy, secret.isNotEmpty(), ::submit)
         TextButton(onClick = { useRecoveryKey = !useRecoveryKey; secret = ""; error = null }) {
             Text(if (useRecoveryKey) "Use password instead" else "Forgot password? Use recovery key")
         }
+        if (onCancel != null) TextButton(enabled = !busy, onClick = onCancel) { Text("Cancel") }
     }
 }
 

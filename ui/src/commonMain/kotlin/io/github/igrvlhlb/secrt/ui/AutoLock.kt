@@ -2,6 +2,7 @@ package io.github.igrvlhlb.secrt.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -44,3 +45,6 @@ internal fun AutoLockEffect(session: AppSession, autoLock: AutoLock) {
 
 @Composable
 internal fun rememberAutoLock() = remember { AutoLock() }
+
+/** The app's [AutoLock], for screens that launch the platform's pickers. */
+val LocalAutoLock = staticCompositionLocalOf { AutoLock() }

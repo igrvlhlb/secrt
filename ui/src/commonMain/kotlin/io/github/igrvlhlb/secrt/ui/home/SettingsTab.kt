@@ -1,6 +1,17 @@
 package io.github.igrvlhlb.secrt.ui.home
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Upload
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.Alignment
+import io.github.igrvlhlb.secrt.archive.SecrtArchive
+import io.github.igrvlhlb.secrt.ui.LocalAutoLock
+import io.github.igrvlhlb.secrt.ui.components.today
+import io.github.igrvlhlb.secrt.ui.platform.rememberCreateDocument
+import io.github.igrvlhlb.secrt.ui.platform.rememberOpenDocument
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -52,7 +63,51 @@ fun SettingsTab(session: AppSession) {
     var confirmRegenerate by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
     var shownKey by remember { mutableStateOf<String?>(null) }
+    var working by remember { mutableStateOf<String?>(null) }
+    val autoLock = LocalAutoLock.current
     LaunchedEffect(Unit) { hasRecoveryKey = session.hasRecoveryKey() }
+
+    /** Runs a backup operation with a blocking progress dialog, reporting failures in the snackbar. */
+    fun runWithProgress(label: String, action: suspend () -> String) {
+        working = label
+        scope.launch {
+            val message = try {
+                action()
+            } catch (e: Exception) {
+                e.message ?: "Something went wrong"
+            } finally {
+                working = null
+            }
+            snackbar.showSnackbar(message)
+        }
+    }
+
+    val createBackupFile = rememberCreateDocument { target ->
+        autoLock.resume()
+        if (target != null) {
+            runWithProgress("Exporting…") {
+                try {
+                    session.exportTo(target.openSink())
+                } catch (e: Exception) {
+                    target.delete()
+                    throw e
+                }
+                "Backup saved as ${target.name}"
+            }
+        }
+    }
+    val pickBackupFile = rememberOpenDocument { document ->
+        autoLock.resume()
+        if (document != null) {
+            runWithProgress("Importing…") {
+                when (val added = session.importFrom(document.openSource())) {
+                    0 -> "Nothing new in ${document.name}"
+                    1 -> "Imported 1 change"
+                    else -> "Imported $added changes"
+                }
+            }
+        }
+    }
 
     TabScaffold(topBar = { TopAppBar(title = { Text("Settings") }) }) { modifier ->
         Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -74,6 +129,25 @@ fun SettingsTab(session: AppSession) {
                 }
             }
             ElevatedCard {
+                SettingRow(
+                    Icons.Outlined.Upload,
+                    "Export encrypted backup",
+                    "Save a .secrt file of the whole diary. It opens only with your password or recovery key.",
+                ) {
+                    autoLock.pause()
+                    createBackupFile(SecrtArchive.fileName(today().toString()))
+                }
+                HorizontalDivider()
+                SettingRow(
+                    Icons.Outlined.Download,
+                    "Import a backup",
+                    "Merge entries from a .secrt backup of this diary, e.g. one made on another device.",
+                ) {
+                    autoLock.pause()
+                    pickBackupFile()
+                }
+            }
+            ElevatedCard {
                 SettingRow(Icons.Outlined.Lock, "Lock now", "The diary also locks a minute after you leave the app") { scope.launch { session.lock() } }
             }
             ElevatedCard {
@@ -84,7 +158,8 @@ fun SettingsTab(session: AppSession) {
                     supportingContent = {
                         Text(
                             "Entries, folders, labels and attachments are stored encrypted on this device only. " +
-                                "Nothing is uploaded. Syncing with other devices and backups are coming later.",
+                                "Nothing is uploaded: backups are files you export and keep wherever you like. " +
+                                "Syncing with other devices is coming later.",
                         )
                     },
                 )
@@ -115,6 +190,18 @@ fun SettingsTab(session: AppSession) {
             destructive = true,
             onConfirm = { scope.launch { session.removeRecoveryKey(); hasRecoveryKey = false } },
             onDismiss = { confirmRemove = false },
+        )
+    }
+    working?.let { label ->
+        AlertDialog(
+            onDismissRequest = {},
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    CircularProgressIndicator(Modifier.size(24.dp))
+                    Text(label)
+                }
+            },
+            confirmButton = {},
         )
     }
     shownKey?.let { key ->

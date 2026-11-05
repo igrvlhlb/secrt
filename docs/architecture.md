@@ -62,7 +62,24 @@ decisions and core architecture first, then features, then UI/UX.
 - Same engine is used for LAN sync, backup pull/push, and encrypted import.
 
 ## Backup & archive format (`core:archive`, `core:backup`)
-Backup layout (identical inside a `.secrt` export zip):
+**`.secrt` export file (implemented).** A standard ZIP, entries *stored* (not compressed, since
+they're already encrypted), timestamps fixed to 1980-01-01. `unzip -l` lists it. Entries, in order:
+```
+manifest.json          {"format":1,"vaultId":"…"}                      plain
+vault.key              key slots, identical to the device's file       plain, no secrets in clear
+log/<deviceId>.seg     JSON list of that device's revisions             XChaCha20-Poly1305, archive subkey,
+                                                                        AAD = vault id + entry name
+blobs/<blobId>         attachments, copied as stored on the device      encrypted with the blob subkey
+```
+- Restore (first run): read `vault.key`, unlock it with the backup's password or recovery key, then
+  apply the revisions to a fresh database. `vault.key` is installed last, so a failed restore
+  leaves the app in "first run" state.
+- Import (merge): only backups of the same diary (same vault id); revisions go through the same
+  merge engine as sync. Backups of another diary are refused for now, since their blob ids and
+  keys differ.
+- Exporting marks this device's revisions as shared, so they are never amended in place afterwards.
+
+Cloud backup layout (planned; same building blocks):
 ```
 secrt/<vaultId>/
   vault.key                    # key slots (no secrets in clear)
