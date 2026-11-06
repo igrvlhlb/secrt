@@ -137,8 +137,13 @@ private fun NewPasswordForm(buttonText: String, busy: Boolean, extra: @Composabl
     BusyButton(buttonText, busy, valid) { onSubmit(password) }
 }
 
+/** @param moreRestoreOptions other ways to bring an existing diary, shown under the backup file one. */
 @Composable
-fun SetupScreen(onCreate: suspend (password: String, withRecoveryKey: Boolean) -> Unit, onRestore: () -> Unit) {
+fun SetupScreen(
+    onCreate: suspend (password: String, withRecoveryKey: Boolean) -> Unit,
+    onRestore: () -> Unit,
+    moreRestoreOptions: @Composable () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     var withRecoveryKey by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
@@ -187,6 +192,7 @@ fun SetupScreen(onCreate: suspend (password: String, withRecoveryKey: Boolean) -
             Spacer(Modifier.width(8.dp))
             Text("Restore from a backup file")
         }
+        moreRestoreOptions()
     }
 }
 

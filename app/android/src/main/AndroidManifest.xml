@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Cloud backup to the user's own WebDAV server; only ever used when they ask for it. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!--
         Backups are off on purpose: the diary only leaves the device when the user asks for it
         (export / backup features, see BACKLOG.md), never through Android's automatic cloud backup.

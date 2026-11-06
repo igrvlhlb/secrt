@@ -55,8 +55,10 @@ compose.desktop {
             packageVersion = "0.1.0"
             description = "Encrypted, local-first diary"
             // The bundled runtime only has the JDK modules listed here (from `suggestRuntimeModules`):
-            // JDBC for the database, and jdk.unsupported for JNA (libsodium).
-            modules("java.instrument", "java.sql", "jdk.unsupported")
+            // JDBC for the database, jdk.unsupported for JNA (libsodium). java.management is listed
+            // since the HTTP client for cloud backup joined; a spare module is cheap, a missing one
+            // only fails at runtime. TLS needs nothing extra (the EC crypto lives in java.base since JDK 22).
+            modules("java.instrument", "java.management", "java.sql", "jdk.unsupported")
 
             macOS {
                 bundleID = "io.github.igrvlhlb.secrt"

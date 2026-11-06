@@ -9,6 +9,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.Alignment
 import io.github.igrvlhlb.secrt.archive.SecrtArchive
 import io.github.igrvlhlb.secrt.ui.LocalAutoLock
+import io.github.igrvlhlb.secrt.ui.backup.CloudBackupRow
 import io.github.igrvlhlb.secrt.ui.components.today
 import io.github.igrvlhlb.secrt.ui.platform.rememberCreateDocument
 import io.github.igrvlhlb.secrt.ui.platform.rememberOpenDocument
@@ -195,6 +196,8 @@ fun SettingsTab(session: AppSession) {
                     autoLock.pause()
                     pickBackupFile()
                 }
+                HorizontalDivider()
+                CloudBackupRow(session)
             }
             ElevatedCard {
                 SettingRow(Icons.Outlined.Timer, "Auto-lock", settings.autoLock.description) { choosingAutoLock = true }

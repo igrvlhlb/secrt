@@ -31,6 +31,7 @@ import io.github.igrvlhlb.secrt.ui.auth.RecoveryKeyScreen
 import io.github.igrvlhlb.secrt.ui.auth.RestoreScreen
 import io.github.igrvlhlb.secrt.ui.auth.SetupScreen
 import io.github.igrvlhlb.secrt.ui.auth.UnlockScreen
+import io.github.igrvlhlb.secrt.ui.backup.CloudRestoreButton
 import io.github.igrvlhlb.secrt.ui.editor.EditorScreen
 import io.github.igrvlhlb.secrt.ui.editor.EditorViewModel
 import io.github.igrvlhlb.secrt.ui.home.HomeScreen
@@ -81,6 +82,7 @@ fun SecrtApp(
                             }
                         },
                         onRestore = pickBackup,
+                        moreRestoreOptions = { CloudRestoreButton(session) },
                     )
                     else -> RestoreScreen(
                         fileName = backup.name,
