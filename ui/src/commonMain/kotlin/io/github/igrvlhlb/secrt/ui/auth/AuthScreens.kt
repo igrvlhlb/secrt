@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -138,7 +139,11 @@ private fun NewPasswordForm(buttonText: String, busy: Boolean, extra: @Composabl
 }
 
 @Composable
-fun SetupScreen(onCreate: suspend (password: String, withRecoveryKey: Boolean) -> Unit, onRestore: () -> Unit) {
+fun SetupScreen(
+    onCreate: suspend (password: String, withRecoveryKey: Boolean) -> Unit,
+    onRestore: () -> Unit,
+    onSetUpFromPhone: (() -> Unit)? = null,
+) {
     val scope = rememberCoroutineScope()
     var withRecoveryKey by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
@@ -186,6 +191,13 @@ fun SetupScreen(onCreate: suspend (password: String, withRecoveryKey: Boolean) -
             Icon(Icons.Outlined.Restore, contentDescription = null)
             Spacer(Modifier.width(8.dp))
             Text("Restore from a backup file")
+        }
+        if (onSetUpFromPhone != null) {
+            OutlinedButton(onClick = onSetUpFromPhone, enabled = !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                Icon(Icons.Outlined.PhoneAndroid, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Set up from your phone")
+            }
         }
     }
 }
@@ -273,7 +285,7 @@ fun RestoreScreen(fileName: String, onRestore: suspend (Credential) -> Unit, onC
  * @param extraActions shown under the submit button.
  */
 @Composable
-private fun CredentialScreen(
+internal fun CredentialScreen(
     title: String,
     passwordHint: String,
     recoveryHint: String,

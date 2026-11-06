@@ -23,6 +23,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import io.github.igrvlhlb.secrt.lan.LanSync
 import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.session.SessionState
 import io.github.igrvlhlb.secrt.storage.DiaryStore
@@ -31,6 +32,10 @@ import io.github.igrvlhlb.secrt.ui.auth.RecoveryKeyScreen
 import io.github.igrvlhlb.secrt.ui.auth.RestoreScreen
 import io.github.igrvlhlb.secrt.ui.auth.SetupScreen
 import io.github.igrvlhlb.secrt.ui.auth.UnlockScreen
+import io.github.igrvlhlb.secrt.ui.devices.DevicesScreen
+import io.github.igrvlhlb.secrt.ui.devices.JoinFromPhoneScreen
+import io.github.igrvlhlb.secrt.ui.devices.LocalOpenDevices
+import io.github.igrvlhlb.secrt.ui.devices.isComputer
 import io.github.igrvlhlb.secrt.ui.editor.EditorScreen
 import io.github.igrvlhlb.secrt.ui.editor.EditorViewModel
 import io.github.igrvlhlb.secrt.ui.home.HomeScreen
@@ -48,12 +53,14 @@ import kotlinx.serialization.Serializable
  *   away (saving the entry being edited).
  * @param autoLock pass one that lives as long as [session] where the UI can be recreated while
  *   the diary stays open (Android activities); see [AutoLock].
+ * @param lan pairing and sync with the user's other devices; `null` leaves it out.
  */
 @Composable
 fun SecrtApp(
     session: AppSession,
     backgroundScope: CoroutineScope,
     autoLock: AutoLock = remember(session) { AutoLock(session, backgroundScope) },
+    lan: LanSync? = null,
 ) {
     SecrtTheme {
         Surface(Modifier.fillMaxSize()) {
@@ -63,14 +70,16 @@ fun SecrtApp(
             var creating by remember { mutableStateOf(false) }
             var pendingRecoveryKey by remember { mutableStateOf<String?>(null) }
             var backupToRestore by remember { mutableStateOf<PickedDocument?>(null) }
+            var joiningFromPhone by remember { mutableStateOf(false) }
             val pickBackup = rememberOpenDocument { backupToRestore = it }
 
             AutoLockEffect(autoLock)
             // Everything opened while unlocked (ViewModels holding diary content) goes away on lock.
-            LaunchedEffect(state) { if (state !is SessionState.Unlocked) unlockedScope.clear() }
+            LaunchedEffect(state) { if (state !is SessionState.Unlocked) unlockedScope.clear() else joiningFromPhone = false }
 
             when (val s = state) {
                 SessionState.NoVault -> when (val backup = backupToRestore) {
+                    null if joiningFromPhone && lan != null -> JoinFromPhoneScreen(lan, onCancel = { joiningFromPhone = false })
                     null -> SetupScreen(
                         onCreate = { password, withRecoveryKey ->
                             creating = true
@@ -81,6 +90,7 @@ fun SecrtApp(
                             }
                         },
                         onRestore = pickBackup,
+                        onSetUpFromPhone = if (lan != null && isComputer) ({ joiningFromPhone = true }) else null,
                     )
                     else -> RestoreScreen(
                         fileName = backup.name,
@@ -105,7 +115,7 @@ fun SecrtApp(
                     pendingRecoveryKey != null -> RecoveryKeyScreen(pendingRecoveryKey!!) { pendingRecoveryKey = null }
                     s.viaRecoveryKey -> NewPasswordScreen { session.changePassword(currentPassword = null, newPassword = it) }
                     else -> CompositionLocalProvider(LocalViewModelStoreOwner provides unlockedScope, LocalAutoLock provides autoLock) {
-                        DiaryNavigation(s.store, session, autoLock, backgroundScope)
+                        DiaryNavigation(s.store, session, autoLock, backgroundScope, lan)
                     }
                 }
             }
@@ -121,17 +131,31 @@ internal data object HomeRoute
 @Serializable
 internal data class EditorRoute(val entryId: String? = null, val folderId: String? = null)
 
+@Serializable
+internal data object DevicesRoute
+
 @Composable
-private fun DiaryNavigation(store: DiaryStore, session: AppSession, autoLock: AutoLock, backgroundScope: CoroutineScope) {
+private fun DiaryNavigation(store: DiaryStore, session: AppSession, autoLock: AutoLock, backgroundScope: CoroutineScope, lan: LanSync?) {
     val nav = rememberNavController()
+    val openDevices: (() -> Unit)? = if (lan == null) null else ({ nav.navigate(DevicesRoute) { launchSingleTop = true } })
+    if (lan != null) {
+        // A pairing code handed in from outside (debug builds) is picked up by the Devices screen.
+        val pendingLink by lan.pendingPairingLink.collectAsStateWithLifecycle()
+        LaunchedEffect(pendingLink != null) { if (pendingLink != null) openDevices?.invoke() }
+    }
     NavHost(nav, startDestination = HomeRoute) {
         composable<HomeRoute> {
-            HomeScreen(
-                store = store,
-                session = session,
-                onOpenEntry = { nav.navigate(EditorRoute(entryId = it)) },
-                onNewEntry = { nav.navigate(EditorRoute(folderId = it)) },
-            )
+            CompositionLocalProvider(LocalOpenDevices provides openDevices) {
+                HomeScreen(
+                    store = store,
+                    session = session,
+                    onOpenEntry = { nav.navigate(EditorRoute(entryId = it)) },
+                    onNewEntry = { nav.navigate(EditorRoute(folderId = it)) },
+                )
+            }
+        }
+        if (lan != null) {
+            composable<DevicesRoute> { DevicesScreen(lan, store, onBack = { nav.popBackStack(HomeRoute, inclusive = false) }) }
         }
         composable<EditorRoute> { entry ->
             val route = entry.toRoute<EditorRoute>()

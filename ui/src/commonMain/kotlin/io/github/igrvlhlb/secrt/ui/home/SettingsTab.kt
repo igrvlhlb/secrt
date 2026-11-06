@@ -67,6 +67,8 @@ import io.github.igrvlhlb.secrt.session.BiometricException
 import io.github.igrvlhlb.secrt.ui.auth.MIN_PASSWORD_LENGTH
 import io.github.igrvlhlb.secrt.ui.auth.PasswordField
 import io.github.igrvlhlb.secrt.ui.auth.RecoveryKeyCard
+import io.github.igrvlhlb.secrt.ui.devices.LocalOpenDevices
+import androidx.compose.material.icons.outlined.Devices
 import io.github.igrvlhlb.secrt.ui.components.ConfirmDialog
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
 import kotlinx.coroutines.launch
@@ -196,6 +198,9 @@ fun SettingsTab(session: AppSession) {
                     pickBackupFile()
                 }
             }
+            LocalOpenDevices.current?.let { openDevices ->
+                ElevatedCard { SettingRow(Icons.Outlined.Devices, "Devices", "Pair with your computer and sync over Wi-Fi") { openDevices() } }
+            }
             ElevatedCard {
                 SettingRow(Icons.Outlined.Timer, "Auto-lock", settings.autoLock.description) { choosingAutoLock = true }
                 if (biometricAvailability != BiometricAvailability.Unsupported || biometricEnabled) {
@@ -225,7 +230,7 @@ fun SettingsTab(session: AppSession) {
                         Text(
                             "Entries, folders, labels and attachments are stored encrypted on this device only. " +
                                 "Nothing is uploaded: backups are files you export and keep wherever you like. " +
-                                "Syncing with other devices is coming later.",
+                                "Devices you pair sync directly with each other over your Wi-Fi.",
                         )
                     },
                 )
