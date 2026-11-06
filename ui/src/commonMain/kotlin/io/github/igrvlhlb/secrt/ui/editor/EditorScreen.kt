@@ -82,6 +82,7 @@ import io.github.igrvlhlb.secrt.ui.components.LabelPickerDialog
 import io.github.igrvlhlb.secrt.ui.components.formatBytes
 import io.github.igrvlhlb.secrt.ui.components.longFormat
 import io.github.igrvlhlb.secrt.ui.components.pathTo
+import io.github.igrvlhlb.secrt.ui.components.readableWidth
 import io.github.igrvlhlb.secrt.ui.platform.rememberFilePicker
 import kotlinx.coroutines.launch
 
@@ -142,7 +143,7 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
             return@Scaffold
         }
         Column(
-            Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            Modifier.fillMaxSize().padding(padding).imePadding().verticalScroll(rememberScrollState()).readableWidth().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             state.conflict?.let { ConflictBanner(it, vm::keepThisVersion) }

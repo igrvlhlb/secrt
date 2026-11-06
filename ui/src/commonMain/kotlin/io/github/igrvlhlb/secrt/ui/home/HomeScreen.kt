@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.storage.DiaryStore
+import io.github.igrvlhlb.secrt.ui.components.readableWidth
 
 enum class HomeTab(val title: String, val icon: ImageVector) {
     Journal("Journal", Icons.Outlined.Book),
@@ -89,7 +90,7 @@ fun TabScaffold(
         topBar = topBar,
         floatingActionButton = { fab?.invoke() },
         contentWindowInsets = WindowInsets(0),
-    ) { padding -> content(Modifier.padding(padding)) }
+    ) { padding -> content(Modifier.padding(padding).fillMaxSize().readableWidth()) }
 }
 
 @Composable
