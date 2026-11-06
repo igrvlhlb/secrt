@@ -1,0 +1,10 @@
+-- Version 1 -> 2: devices paired for LAN sync.
+CREATE TABLE peer (
+    identity_key TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    device_id TEXT,
+    paired_at INTEGER NOT NULL,
+    last_sync_at INTEGER,
+    addresses TEXT,
+    version_vector TEXT
+);

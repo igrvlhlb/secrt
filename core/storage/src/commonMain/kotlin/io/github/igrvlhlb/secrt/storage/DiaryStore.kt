@@ -58,6 +58,9 @@ class DiaryStore private constructor(
     private val writeLock = Mutex()
     private var closed = false
 
+    /** Devices paired for LAN sync, and this replica's identity. */
+    val peers: PeerStore = PeerStore(this, db, dispatcher)
+
     // ---------------------------------------------------------------- reads
 
     fun observeEntries(filter: EntryFilter = EntryFilter()): Flow<List<EntrySummary>> {
@@ -110,6 +113,19 @@ class DiaryStore private constructor(
     }
 
     suspend fun readAttachment(blobId: String): ByteArray = read { blobs.get(blobId) }
+
+    /** An attachment's encrypted file as stored, to send to another replica of this diary; `null` if absent. */
+    suspend fun readEncryptedAttachment(blobId: String): ByteArray? = read { if (blobs.exists(blobId)) blobs.readEncrypted(blobId) else null }
+
+    suspend fun hasAttachment(blobId: String): Boolean = read { blobs.exists(blobId) }
+
+    /**
+     * Stores an encrypted attachment received from another replica, after checking it decrypts
+     * and matches its id.
+     *
+     * @throws io.github.igrvlhlb.secrt.crypto.DecryptionException if it doesn't.
+     */
+    suspend fun putEncryptedAttachment(blobId: String, encrypted: ByteArray) = write { blobs.putEncrypted(blobId, encrypted) }
 
     // ---------------------------------------------------------------- entries
 
@@ -360,12 +376,12 @@ class DiaryStore private constructor(
         conflict = conflict?.let(ConflictKind::valueOf),
     )
 
-    private suspend fun <T> read(block: () -> T): T = withContext(dispatcher) {
+    internal suspend fun <T> read(block: () -> T): T = withContext(dispatcher) {
         if (closed) throw StoreClosedException()
         block()
     }
 
-    private suspend fun <T> write(block: () -> T): T = withContext(dispatcher) {
+    internal suspend fun <T> write(block: () -> T): T = withContext(dispatcher) {
         writeLock.withLock {
             if (closed) throw StoreClosedException()
             block()
@@ -373,7 +389,7 @@ class DiaryStore private constructor(
     }
 
     /** Queries still running when the diary locks fail; nobody is listening by then. */
-    private fun <T> Flow<T>.ignoreAfterClose(): Flow<T> = catch { if (!closed) throw it }
+    internal fun <T> Flow<T>.ignoreAfterClose(): Flow<T> = catch { if (!closed) throw it }
 
     companion object {
         const val MAX_ATTACHMENT_BYTES = 20L * 1024 * 1024

@@ -1,0 +1,45 @@
+-- Devices this replica has paired with over the LAN (see docs/architecture.md, "LAN pairing & sync").
+-- Only these identities may sync with it. Not derived from revisions: each replica has its own peers.
+CREATE TABLE peer (
+    -- The peer's Ed25519 identity public key, base64url. Proven by a signature on every connection.
+    identity_key TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    -- The peer's own device id (the one in its revisions); null until it has a diary.
+    device_id TEXT,
+    paired_at INTEGER NOT NULL,
+    last_sync_at INTEGER,
+    -- Where this device last reached the peer ("host:port", comma-separated, most recent first);
+    -- null for peers that connect to us.
+    addresses TEXT,
+    -- The peer's version vector (JSON) as of the last sync.
+    version_vector TEXT
+);
+
+all:
+SELECT * FROM peer ORDER BY paired_at;
+
+byKey:
+SELECT * FROM peer WHERE identity_key = ?;
+
+insertIfAbsent:
+INSERT OR IGNORE INTO peer(identity_key, name, device_id, paired_at, addresses) VALUES (?, ?, ?, ?, ?);
+
+-- Pairing again with a known device refreshes it but keeps its sync history.
+refresh:
+UPDATE peer SET
+    name = :name,
+    device_id = coalesce(:device_id, device_id),
+    addresses = coalesce(:addresses, addresses)
+WHERE identity_key = :identity_key;
+
+recordSync:
+UPDATE peer SET
+    name = :name,
+    device_id = coalesce(:device_id, device_id),
+    last_sync_at = :last_sync_at,
+    addresses = coalesce(:addresses, addresses),
+    version_vector = :version_vector
+WHERE identity_key = :identity_key;
+
+delete:
+DELETE FROM peer WHERE identity_key = ?;
