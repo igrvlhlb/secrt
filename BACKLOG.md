@@ -25,9 +25,19 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 ## Backup & export
 - [x] `.secrt` encrypted archive export/import (vault.key + revision segments + blobs)
 - [ ] Plaintext Markdown export (zip, YAML front-matter, `_attachments/`); requires re-entering the password
-- [ ] `BackupTarget` interface + WebDAV implementation (home servers, Nextcloud)
-- [ ] Google Drive `appDataFolder` target
-- [ ] OneDrive, Dropbox, S3-compatible targets
+- [x] Cloud backup engine (`core:backup`): `BackupTarget` interface, append-only per-device segments,
+      push / pull / sync, restore from cloud on first run, bookkeeping and credentials in the encrypted DB
+- [x] WebDAV target (home servers, NAS, Nextcloud; finds Nextcloud's folder from the server address)
+- [x] Settings → Cloud backup (connect, test, back up, sync, disconnect) and "Restore from cloud backup" on first run
+- [ ] Google Drive `appDataFolder` target. Needs an OAuth client ID that the user registers in Google
+      Cloud (and the OAuth flows: desktop loopback + PKCE, Android Authorization API)
+- [ ] OneDrive, Dropbox, S3-compatible targets (the `BackupTarget` interface is all they need)
+- [ ] WebDAV: servers with self-signed certificates (trust a pinned certificate); today TLS must validate
+- [ ] Cloud backup: prune the backup (compact old segments, delete orphaned blobs); today it only grows
+- [ ] Cloud backup: show the backup's devices and sizes; cancel a running backup
+- [ ] Cloud backup: when another device changed the password, offer to adopt the backup's `vault.key`
+      (today each device keeps its own password; the backup holds the last one pushed after a change)
+- [ ] Cloud backup: stream segments and blobs instead of holding each file in memory (fine at the 20 MB cap)
 - [x] Restore-from-backup flow on the first screen of a fresh install
 - [ ] Import a backup of a *different* diary (re-encrypt its attachments and remap blob ids)
 - [ ] Replace the current diary with a backup (today restore is only offered on first run)
@@ -73,5 +83,6 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] UI tests (Compose) and an on-device test that the SQLCipher file holds no plaintext (the JVM
       driver already has one)
 - [ ] CI (build + `allTests`)
-- [ ] Release build: R8 rules for JNA/libsodium and SQLCipher, signing
+- [ ] Release build: R8 rules for JNA/libsodium, SQLCipher and Ktor/OkHttp, signing
+- [ ] Settings "About your data" still says nothing is uploaded; reword now that cloud backup exists (opt-in)
 - [x] Database schema migrations: version-1 snapshot, `verifyMigrations`, upgrade test (see docs/architecture.md)

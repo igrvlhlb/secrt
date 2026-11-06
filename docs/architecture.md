@@ -111,19 +111,51 @@ blobs/<blobId>         attachments, copied as stored on the device      encrypte
   keys differ.
 - Exporting marks this device's revisions as shared, so they are never amended in place afterwards.
 
-Cloud backup layout (planned; same building blocks):
+**Cloud backup (implemented, `core:backup`; WebDAV target).** Same building blocks, laid out as
+files under the target's root:
 ```
 secrt/<vaultId>/
-  vault.key                    # key slots (no secrets in clear)
-  log/<deviceId>-<n>.seg       # encrypted batches of revisions; each device only ever adds its own files
-  blobs/<blob_id>              # encrypted attachments
+  manifest.json                # {"format":1,"vaultId":"…"}; plain. A newer format is refused.
+  vault.key                    # key slots, as on the devices (no secrets in clear)
+  log/<deviceId>-<n>.seg       # revisions, sealed exactly like .secrt segments: archive subkey,
+                               #   AAD = "secrt-archive:<vaultId>:log/<deviceId>-<n>.seg"
+  blobs/<blobId>               # attachments, encrypted exactly as stored on the devices
 ```
-- **Append-only, one writer per file**: two devices can never overwrite each other's backup data. Merging happens on the clients through the sync engine, so pushes need no locking.
-- Push = upload new segments + missing blobs (incremental). Pull = download unknown segments/blobs, then merge.
+- **Append-only, one writer per file**: a device only ever creates `log/<its id>-<n>.seg`, with `n`
+  one above the highest of its files already listed, and never rewrites one. Two devices can't
+  overwrite each other's data, so pushes need no locking or conditional writes; merging happens on
+  the clients through the sync engine. A segment may hold other devices' revisions (e.g. learned by
+  LAN sync): the backup must get everything the pushing device has.
+- **Push** (manual): `manifest.json` if missing; `vault.key` if missing, or if it changed *on this
+  device* since it last uploaded it (so a device that never saw another's password change can't
+  put the old password back); then the blobs the new revisions reference that aren't listed under
+  `blobs/`; then the revisions as segments of at most 2000. The revisions come from
+  `DiaryStore.revisionsSince(remote)`, so this device's revisions are marked shared and never
+  amended again. **Pull**: list `log/`, download the segments not seen yet, decrypt and check all of
+  them and the blobs they need (blob ids are keyed hashes, checked on arrival), and only then
+  `applyRemote`. Any damaged, tampered or renamed file stops the pull with nothing merged. A blob
+  missing on the server (its writer never had it) is counted and skipped. **Sync** = pull, then push.
+- Bookkeeping per target, in the encrypted DB's `meta` table (`backup.state:<target id>`, JSON): the
+  version vector the target is known to hold (read from or written to it), the highest segment
+  number read per writing device, the `vault.key` last uploaded, and the last backup time. It is a
+  cache: losing it only costs re-reading or re-uploading, since merging is idempotent. If the
+  backup was deleted on the server (no `vault.key`, or none of this device's segments are left),
+  the next push starts over. The target's settings and credentials (`backup.target`) live in the
+  same table: backups only run while the diary is unlocked.
+- **Restore on first run**: find `secrt/*/vault.key`, unlock it with the password or recovery key,
+  download everything, apply it to a fresh database, remember the target, and install `vault.key`
+  last, through `AppSession.restoreFrom`, which wipes everything on any failure (as for `.secrt`).
+- Operations run inside `AppSession.withOpenDiary`, holding the session lock: the diary can't lock,
+  and wipe the keys, halfway through a backup; a lock request waits for it to finish.
 - Desktop without the phone: pull backup, then edit, then push. The phone later pulls or LAN-syncs, and everything merges.
-- `BackupTarget` interface: `list(prefix)`, `get(path)`, `put(path, bytes)`, `delete(path)`.
-  1. WebDAV (first, easy to test locally; covers home servers and Nextcloud)
-  2. Google Drive `appDataFolder` (scope `drive.appdata`, like WhatsApp)
+- `BackupTarget` interface: `list(directory)` (direct children, sub-directories with a trailing
+  `/`), `get(path)`, `put(path, bytes)` (atomic, creates parents), `delete(path)`; paths are limited
+  to `[A-Za-z0-9._-]` segments.
+  1. WebDAV (done): Ktor with the OkHttp engine (Android and desktop), Basic auth, `PROPFIND`
+     depth 1 / `GET` / `PUT` / `MKCOL` / `DELETE`. Given a bare server address it also tries
+     Nextcloud/ownCloud's `/remote.php/dav/files/<user>/`; connecting writes and deletes a probe
+     file. Plain `http://` works but the UI warns that the server password is then unprotected.
+  2. Google Drive `appDataFolder` (scope `drive.appdata`, like WhatsApp); needs an OAuth client ID.
   3. Later: OneDrive (Graph `approot`), Dropbox app folder, S3-compatible.
 - OAuth: desktop loopback redirect + PKCE; Android Credential Manager/Authorization API; iOS ASWebAuthenticationSession.
 - Plaintext export: zip of `<folder path>/<date>-<title>.md` with YAML front-matter (id, dates, labels), plus `_attachments/` linked relatively.
@@ -185,7 +217,9 @@ Rule: `core/*` is `commonMain` only, apart from the `DriverFactory` and crypto a
   - Crypto: known-answer tests; wrong-password and tampered-ciphertext rejection; recovery-key unlock; password change.
   - Sync: property-based tests. Random edits on N replicas, synced in random orders, must converge to identical state with no lost revisions. Specific tests for each merge rule and conflict.
   - Archive: `.secrt` round-trip (export, then import into an empty vault, gives identical state); Markdown export snapshot test.
-- Backup: integration tests against a local WebDAV container (e.g. `bytemark/webdav` or Nextcloud in Docker).
+- Backup: engine tests against an in-memory `BackupTarget`, WebDAV client tests against an
+  in-process WebDAV server, and `RealWebDavServerTest`, which runs against a real server when
+  `SECRT_WEBDAV_URL`/`_USER`/`_PASSWORD` are set (e.g. `wsgidav` in a venv, or Nextcloud in Docker).
 - End-to-end manual:
   1. Android emulator + desktop: pair via QR, write on both offline, sync, and check the merge and conflict UI.
   2. Desktop pushes a backup; a fresh install restores from it with the password, then with the recovery key.
