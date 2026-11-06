@@ -29,36 +29,43 @@ import kotlin.random.Random
 import kotlin.time.Clock
 
 /** Progress of a pairing or sync started on this device, for the UI. */
-enum class LanProgress { Connecting, SendingDiary, Syncing }
+enum class LanProgress { Connecting, SendingDiary, ReceivingDiary, Syncing }
 
 sealed interface PairingResult {
     val peerName: String
 
-    /** Paired with a computer holding this same diary, and synced right away. */
+    /** Paired with a device holding this same diary, and synced right away. */
     data class Paired(override val peerName: String, val stats: SyncStats) : PairingResult
 
-    /** The computer had no diary: it received this one, and opens it with this diary's password. */
+    /** The other device had no diary: it received this one, and opens it with this diary's password. */
     data class DiarySent(override val peerName: String) : PairingResult
 }
 
-/** A diary received from a phone, waiting for its password on this (first-run) computer. */
+/**
+ * A diary received from another device, waiting for its password on this one, which has no diary
+ * yet. It came either to a computer showing a code ([LanSync.host] with `joining`), or to a device
+ * that scanned the code of one holding the diary ([LanSync.join]).
+ */
 class PendingJoin internal constructor(
     internal val file: Path,
     internal val identitySeed: ByteArray,
     internal val peerKey: String,
     val peerName: String,
     internal val peerDeviceId: String?,
+    /** Where to reach the sender for later syncs; empty when the sender is the one that connected. */
+    internal val peerAddresses: List<String>,
 )
 
 /**
  * Pairing and sync with the user's other devices on the local network (see docs/architecture.md,
- * "LAN pairing & sync"). The phone connects ([pair], [sync]); the computer listens while the user
- * keeps its Devices screen (or its "set up from your phone" screen) open ([host]).
+ * "LAN pairing & sync"). The device that scanned a pairing code connects ([pair], [join], [sync]);
+ * the one that showed it listens while the user keeps its Devices screen (or a computer's "set up
+ * from your phone" screen) open ([host]). Phones do both; computers can't scan, so they only listen.
  *
  * Every connection is authenticated and encrypted by [Handshake]; nothing received is applied
- * before that. Both diaries must be unlocked, except on a computer being set up, which has none yet.
+ * before that. Both diaries must be unlocked, except on a device being set up, which has none yet.
  *
- * @param tempDirectory for the encrypted diary archive while setting up a computer; must not be
+ * @param tempDirectory for the encrypted diary archive while setting up a device; must not be
  *   inside the vault directory (restoring wipes that).
  * @param deviceName how this device is shown on the other one.
  * @param localAddresses this device's addresses for pairing codes; [localNetworkAddresses] by default.
@@ -87,13 +94,13 @@ class LanSync(
 
     private val _pendingJoin = MutableStateFlow<PendingJoin?>(null)
 
-    /** Set once a phone has sent its diary to this computer; [completeJoin] opens it. */
+    /** Set once another device has sent its diary to this one; [completeJoin] opens it. */
     val pendingJoin: StateFlow<PendingJoin?> = _pendingJoin.asStateFlow()
 
-    // ------------------------------------------------------------------ connecting side (phone)
+    // ------------------------------------------------------------------ connecting side (scanned a code)
 
     /**
-     * Pairs with the computer showing the QR code [link], then syncs with it, or sets it up with
+     * Pairs with the device showing the QR code [link], then syncs with it, or sets it up with
      * this diary if it has none.
      *
      * @throws LanException
@@ -103,8 +110,7 @@ class LanSync(
         val store = unlockedStore()
         val vaultId = session.vaultId ?: throw LanException.Locked()
         progress(LanProgress.Connecting)
-        val computer = "the computer"
-        withConnection(invite.addresses.map { "$it:${invite.port}" }, computer) { connection, address ->
+        withConnection(invite.addresses.map { "$it:${invite.port}" }, OTHER_DEVICE) { connection, address ->
             val crypto = cryptoProvider()
             val identity = identityOf(store, crypto)
             val messages = try {
@@ -137,7 +143,52 @@ class LanSync(
     }
 
     /**
-     * Syncs with a paired computer at the address it was last reached at (see [Peer.addresses]).
+     * Sets this device, which has no diary yet, up from the device showing the QR code [link]:
+     * pairs with it and receives its diary as an encrypted archive. Nothing is opened yet: the user
+     * types the diary's password ([completeJoin]), which also keeps the sender as a paired device.
+     *
+     * Showing the code is the other side's consent, as for pairing: it's one-time and short-lived.
+     *
+     * @throws LanException
+     */
+    suspend fun join(link: String, progress: (LanProgress) -> Unit = {}): PendingJoin = client {
+        check(session.state.value == SessionState.NoVault) { "This device already holds a diary" }
+        val invite = PairingInvite.parse(link)
+        progress(LanProgress.Connecting)
+        val crypto = cryptoProvider()
+        // No database to keep an identity in yet: a provisional one, saved once the diary opens.
+        val seed = crypto.randomBytes(IDENTITY_SEED_BYTES)
+        try {
+            withConnection(invite.addresses.map { "$it:${invite.port}" }, OTHER_DEVICE) { connection, address ->
+                val identity = crypto.signingKeyPairFromSeed(seed)
+                val messages = try {
+                    MessageChannel(Handshake.initiate(connection, crypto, identity, ConnectionMode.Pair, invite.identityKey, invite.secret))
+                } finally {
+                    crypto.wipe(identity.secretKey)
+                }
+                messages.send(Hello(deviceName().clean(), deviceId = null, vaultId = null))
+                val hello = try {
+                    messages.expect<Hello>()
+                } catch (e: LanException.DifferentDiary) {
+                    // How versions from before this flow answer a hello without a diary.
+                    throw LanException.Outdated()
+                }
+                // A device without a diary refuses with NoDiary instead of saying hello.
+                if (hello.vaultId == null) throw LanException.Protocol("no diary")
+                progress(LanProgress.ReceivingDiary)
+                val file = receiveDiary(messages)
+                messages.send(Received)
+                val addresses = (listOf(address) + invite.addresses.map { "$it:${invite.port}" }).distinct()
+                PendingJoin(file, seed.copyOf(), invite.identityKey.toKeyString(), hello.deviceName.clean(), hello.deviceId, addresses)
+                    .also(::offerJoin)
+            }
+        } finally {
+            crypto.wipe(seed)
+        }
+    }
+
+    /**
+     * Syncs with a paired device at the address it was last reached at (see [Peer.addresses]).
      *
      * @throws LanException
      */
@@ -172,7 +223,7 @@ class LanSync(
     /** Unpairs [peer] on this device. It can't sync with this one until paired again. */
     suspend fun forget(peer: Peer) = unlockedStore().peers.forget(peer.identityKey)
 
-    // ------------------------------------------------------------------ listening side (computer)
+    // ------------------------------------------------------------------ listening side (showed a code)
 
     /**
      * Listens for this user's devices while the returned host [runs][LanHost.run].
@@ -182,9 +233,11 @@ class LanSync(
      */
     fun host(joining: Boolean = false): LanHost = LanHost(this, joining)
 
+    // ------------------------------------------------------------------ either side, without a diary yet
+
     /**
-     * Opens the diary a phone sent ([pendingJoin]) with its password or recovery key, and keeps
-     * the phone as a paired device.
+     * Opens the diary another device sent ([pendingJoin]) with its password or recovery key, and
+     * keeps that device as a paired one.
      *
      * @throws io.github.igrvlhlb.secrt.vault.InvalidCredentialsException (the diary stays pending, to retry)
      */
@@ -193,7 +246,7 @@ class LanSync(
         session.restore(fileSystem.source(join.file), credential)
         val store = unlockedStore()
         store.peers.setIdentitySeed(join.identitySeed)
-        store.peers.pair(join.peerKey, join.peerName, join.peerDeviceId, emptyList(), now())
+        store.peers.pair(join.peerKey, join.peerName, join.peerDeviceId, join.peerAddresses, now())
         discardJoin()
     }
 
@@ -230,14 +283,15 @@ class LanSync(
     internal fun receivedDiaryFile(): Path = tempDirectory / "received-diary.secrt"
 
     internal fun offerJoin(join: PendingJoin) {
-        discardJoin()
         _pendingJoin.value = join
     }
 
-    /** Receives the diary archive a phone sends to set this computer up. */
+    /** Receives the diary archive another device sends to set this one up. */
     internal suspend fun receiveDiary(messages: MessageChannel): Path {
         val start = messages.expect<ArchiveStart>()
         if (start.size !in 1..MAX_ARCHIVE_BYTES) throw LanException.Protocol("archive size")
+        // A diary still waiting for its password gives way to the new one, which reuses its file.
+        discardJoin()
         fileSystem.createDirectories(tempDirectory)
         val file = receivedDiaryFile()
         var received = 0L
@@ -269,10 +323,11 @@ class LanSync(
 
     /**
      * Sends this whole diary as a `.secrt` archive: the same encrypted format as a backup file, so
-     * the computer restores it with the existing, tested code path. It is staged in [tempDirectory]
-     * (it's encrypted) rather than in memory, which could be too small for the attachments.
+     * the other device restores it with the existing, tested code path. It is staged in
+     * [tempDirectory] (it's encrypted) rather than in memory, which could be too small for the
+     * attachments.
      */
-    private suspend fun sendDiary(messages: MessageChannel) {
+    internal suspend fun sendDiary(messages: MessageChannel) {
         fileSystem.createDirectories(tempDirectory)
         val file = tempDirectory / "outgoing-diary-${Random.nextLong().toULong()}.secrt"
         try {
@@ -336,6 +391,7 @@ class LanSync(
 
     companion object {
         const val DEFAULT_PORT = 47820
+        private const val OTHER_DEVICE = "the other device"
         internal const val IDENTITY_SEED_BYTES = 32
         private const val CHUNK_BYTES = 1024 * 1024
         private const val MAX_ARCHIVE_BYTES = 64L * 1024 * 1024 * 1024

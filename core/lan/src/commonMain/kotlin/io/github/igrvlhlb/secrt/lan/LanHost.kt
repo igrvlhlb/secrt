@@ -18,9 +18,9 @@ import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.withContext
 
 /**
- * The computer's side: listens for the user's devices while [run] runs, which the UI does only
- * while a screen meant for it is open. Nothing is advertised; phones find it through the QR code,
- * or at the address they remember from it.
+ * The side that shows pairing codes: listens for the user's devices while [run] runs, which the UI
+ * does only while a screen meant for it is open. Nothing is advertised; other devices find it
+ * through the QR code, or at the address they remember from it.
  *
  * Connections are served one at a time. Pairing needs a code shown with [showInvite]: a fresh
  * one-time secret, valid for [INVITE_VALIDITY_MILLIS] and consumed by the first device that proves
@@ -47,6 +47,9 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
         /** A phone sent its diary ([joining] only); see [LanSync.pendingJoin]. */
         data class DiaryReceived(val peerName: String) : Event
 
+        /** A device without a diary scanned this one's code and received this diary. */
+        data class DiarySent(val peerName: String) : Event
+
         data class Failed(val message: String) : Event
     }
 
@@ -64,7 +67,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
     /** Swapped atomically: the UI replaces it while a connection may be reading it. */
     private val secret = MutableStateFlow<Secret?>(null)
 
-    /** A computer without a diary has no database for its identity yet: it gets one now, saved after joining. */
+    /** A device without a diary has no database for its identity yet: it gets one now, saved after joining. */
     private var joinIdentitySeed: ByteArray? = null
 
     /**
@@ -80,7 +83,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
             server = bind(selector) ?: return@withContext
             val port = (server.localAddress as InetSocketAddress).port
             val addresses = lan.localAddresses()
-            _status.value = if (addresses.isEmpty()) Status.Failed("This computer isn't connected to a network.") else Status.Listening(addresses, port)
+            _status.value = if (addresses.isEmpty()) Status.Failed("This device isn't connected to a network.") else Status.Listening(addresses, port)
             while (true) {
                 val socket = server.accept()
                 val received = serve(SocketConnection(socket), crypto)
@@ -147,13 +150,14 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
 
             if (joining) {
                 if (hello.vaultId == null) {
-                    messages.send(Failure(Failure.Reason.Protocol))
+                    messages.send(Failure(Failure.Reason.NoDiary))
+                    _events.tryEmit(Event.Failed("$peerName has no diary either: there's nothing to set this computer up from."))
                     return false
                 }
                 messages.send(Hello(lan.ownName(), deviceId = null, vaultId = null))
                 val file = lan.receiveDiary(messages)
                 messages.send(Received)
-                lan.offerJoin(PendingJoin(file, requireNotNull(joinIdentitySeed).copyOf(), peerKey, peerName, hello.deviceId))
+                lan.offerJoin(PendingJoin(file, requireNotNull(joinIdentitySeed).copyOf(), peerKey, peerName, hello.deviceId, peerAddresses = emptyList()))
                 _events.tryEmit(Event.DiaryReceived(peerName))
                 return true
             }
@@ -162,6 +166,19 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
             val vaultId = lan.vaultId()
             if (store == null || vaultId == null) {
                 messages.send(Failure(Failure.Reason.Locked))
+                return false
+            }
+            if (hello.vaultId == null) {
+                // A new device that scanned this one's code: showing the code was the consent to set it up.
+                if (mode != ConnectionMode.Pair) {
+                    messages.send(Failure(Failure.Reason.Protocol))
+                    return false
+                }
+                messages.send(Hello(lan.ownName(), store.deviceId, vaultId))
+                lan.sendDiary(messages)
+                // Its device id comes with the first sync: restoring gives it a new one.
+                store.peers.pair(peerKey, peerName, deviceId = null, addresses = emptyList(), now = lan.now())
+                _events.tryEmit(Event.DiarySent(peerName))
                 return false
             }
             if (hello.vaultId != vaultId) {
@@ -193,7 +210,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
         return false
     }
 
-    /** This computer's identity: the diary's, or the provisional one of a computer being set up. */
+    /** This device's identity: the diary's, or the provisional one of a computer being set up. */
     private suspend fun identity(crypto: Crypto): KeyPair? {
         if (joining) return joinIdentitySeed?.let(crypto::signingKeyPairFromSeed)
         val store = lan.unlockedStoreOrNull() ?: return null

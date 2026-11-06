@@ -61,7 +61,7 @@ internal object Handshake {
     private val MAC_INITIATOR = "secrt-lan/1 pair initiator".encodeToByteArray()
 
     /**
-     * The connecting side (the phone).
+     * The connecting side: the device that scanned the code.
      *
      * @param expectedPeer the identity key the other side must prove: from the QR code, or the
      *   stored peer.
@@ -122,7 +122,7 @@ internal object Handshake {
     }
 
     /**
-     * The listening side (the desktop).
+     * The listening side: the device showing the code.
      *
      * @return the channel and the mode, or `null` if the connection was refused or failed
      *   authentication (it has been closed then; the initiator learns why from an error frame

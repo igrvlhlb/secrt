@@ -4,7 +4,7 @@ import io.github.igrvlhlb.secrt.crypto.Crypto
 import kotlin.io.encoding.Base64
 
 /**
- * What the desktop's QR code carries: where to connect, which identity to expect there, and the
+ * What a pairing QR code carries: where to connect, which identity to expect there, and the
  * one-time secret both sides must prove they know. As text: `secrt-pair:` followed by base64url of
  *
  * ```

@@ -25,7 +25,7 @@ internal data class Hello(
 @SerialName("failure")
 internal data class Failure(val reason: Reason) : LanMessage {
     @Serializable
-    enum class Reason { WrongCode, UnknownDevice, DifferentDiary, Locked, Busy, Protocol }
+    enum class Reason { WrongCode, UnknownDevice, DifferentDiary, NoDiary, Locked, Busy, Protocol }
 }
 
 @Serializable
@@ -53,7 +53,7 @@ internal data class AttachmentMissing(val blobId: String) : LanMessage
 @SerialName("attachmentsEnd")
 internal data object AttachmentsEnd : LanMessage
 
-/** A whole-diary archive follows in chunks: how a computer is set up from the phone. */
+/** A whole-diary archive follows in chunks: how a device without a diary is set up from another one. */
 @Serializable
 @SerialName("archive")
 internal data class ArchiveStart(val size: Long) : LanMessage
@@ -149,6 +149,7 @@ internal fun Failure.toException(peerName: String = "The other device"): LanExce
     Failure.Reason.WrongCode -> LanException.WrongCode()
     Failure.Reason.UnknownDevice -> LanException.UnknownDevice(peerName)
     Failure.Reason.DifferentDiary -> LanException.DifferentDiary()
+    Failure.Reason.NoDiary -> LanException.NoDiary()
     Failure.Reason.Locked -> LanException.Locked()
     Failure.Reason.Busy -> LanException.Busy()
     Failure.Reason.Protocol -> LanException.Protocol("rejected by the other device")
