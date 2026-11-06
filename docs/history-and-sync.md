@@ -118,12 +118,12 @@ Every transport does the same three things:
 different order, or through two paths (LAN and cloud), is harmless. Two devices that hold the
 same set of revisions always show the same diary.
 
-### Over the local network (phone ↔ computer)
+### Over the local network (any two paired devices)
 
 ```mermaid
 sequenceDiagram
-    participant P as 📱 Phone (connects)
-    participant C as 💻 Computer (listening on its Devices screen)
+    participant P as 📱 Device that scanned the code (connects)
+    participant C as 💻 Device that showed it (listening on its Devices screen)
     P->>C: TCP connect + handshake (mutual authentication, fresh session keys)
     P->>C: hello (name, device id, diary id)
     C->>P: hello (must be the same diary id)

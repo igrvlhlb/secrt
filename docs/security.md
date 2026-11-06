@@ -85,15 +85,17 @@ All primitives come from libsodium. Keys are wiped from memory on lock.
 
 Each device holds an Ed25519 identity key pair (its seed is stored in the encrypted database).
 Pairing stores the other device's public key, and later syncs only accept that key. The pairing
-QR code carries the computer's address, its public key and a 256-bit one-time secret valid for 5
+QR code carries the address of the device showing it, its public key and a 256-bit one-time secret valid for 5
 minutes. Both sides prove they know it during the handshake, so neither can be impersonated by
 someone who didn't see the screen. Full details are in
 [architecture.md](architecture.md#lan-pairing--sync-corelan-uidevices).
 
 **A known gap.** When a computer *without* a diary asks to be set up, the phone sends its
 encrypted diary as soon as it scans the code. Someone who tricks the user into scanning their code
-gets the encrypted diary to attack offline (as strong as the password). A confirmation prompt is
-in the backlog.
+gets the encrypted diary to attack offline (as strong as the password). In the other direction
+("Set up from another device"), the device showing the code sends its diary to whoever scans it
+first, so someone who photographs the code within its 5 minutes could race the user. A
+confirmation prompt is in the backlog.
 
 ## Changing the password
 
