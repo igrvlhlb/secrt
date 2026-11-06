@@ -47,7 +47,7 @@ internal fun QrCode(text: String, modifier: Modifier = Modifier) {
     }
 }
 
-/** The computer's pairing code with its countdown; once expired, a button for a new one. */
+/** This device's pairing code with its countdown; once expired, a button for a new one. */
 @Composable
 internal fun PairingCodeCard(invite: LanHost.Invite?, instructions: String, onNewCode: () -> Unit, onCancel: (() -> Unit)?) {
     var now by remember { mutableLongStateOf(Clock.System.now().toEpochMilliseconds()) }
