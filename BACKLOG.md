@@ -11,16 +11,23 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [x] Compose UI: setup/unlock, journal, folders, labels, editor, settings
 
 ## Sync & devices
-- [x] LAN pairing via QR: the computer shows a one-time code, the phone scans it (CameraX + ZXing)
+- [x] LAN pairing via QR: a device shows a one-time code, a phone scans it (CameraX + ZXing)
 - [x] Set up a computer from the phone: it receives the encrypted diary and opens it with the password
+- [x] Set up a phone from another device ("Set up from another device" on its first screen): it scans
+      the code of a device that has the diary and receives it. Showing the code is the only consent,
+      as for the join above (see "LAN join" under Security & privacy, which now applies both ways)
 - [ ] Numeric-code pairing with a PAKE (CPace on ristretto255)
 - [x] Authenticated, encrypted LAN channel (ephemeral X25519 via crypto_kx + Ed25519 identity signatures, SIGMA-I style)
 - [ ] mDNS discovery of already-paired devices (Android NsdManager, iOS Network.framework, desktop JmDNS);
       today the phone remembers the computer's address and fixed port, and a new pairing code updates them
 - [x] Sync protocol over the channel (exchange version vectors, then missing revisions and attachments)
-- [ ] Start a sync from the computer (today only the phone connects; the computer listens on its Devices screen)
+- [ ] Start a sync from the device that showed the code, e.g. the computer (today only the one that
+      scanned connects; the other listens on its Devices screen). Two phones can scan each other's code
 - [ ] Sync on its own while both apps are open (today: "Sync now")
-- [ ] Phone ↔ phone and computer ↔ computer pairing (a device that can both scan and show codes)
+- [x] Phone ↔ phone pairing and sync: phones show codes too (one shows, the other scans)
+- [ ] Computer ↔ computer pairing: neither can scan, so it needs a code typed or pasted (e.g. the PAKE one)
+- [ ] Android: when `targetSdk` moves to 37, declare and request `ACCESS_LOCAL_NETWORK` before LAN use
+      (not needed, and not to be requested, below 37)
 - [ ] Stream sync batches instead of holding all received revisions in memory until the end
 - [ ] Re-request attachments still missing locally (today only those referenced by revisions received in that sync)
 - [ ] Show the other device's identity fingerprint, so users can compare it after pairing

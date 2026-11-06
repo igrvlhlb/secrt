@@ -164,30 +164,42 @@ secrt/<vaultId>/
 - Plaintext export: zip of `<folder path>/<date>-<title>.md` with YAML front-matter (id, dates, labels), plus `_attachments/` linked relatively.
 
 ## LAN pairing & sync (`core:lan`, `ui/devices`)
-Implemented for phone ↔ computer. The phone always connects; the computer listens, and only while
-the user keeps a screen open for it. Nothing is advertised on the network.
+Implemented for phone ↔ computer and phone ↔ phone. One device shows a code and listens, the other
+scans it and connects; the listening side does so only while the user keeps a screen open for it.
+Nothing is advertised on the network.
+
+**Roles.** Every device can show codes (and listen); only devices with a camera can scan them
+(`canScanCodes`: phones). The device that scanned is the one that connects, then and for later
+syncs, since only it knows the other's address. So a computer never connects out, and two
+computers can't pair yet.
 
 **User flow**
-- Computer: Settings → Devices. While that screen is open (and the diary unlocked) it listens on TCP
-  port 47820 (any free port if taken), and "Pair a phone" shows a QR code. A computer without a
-  diary offers "Set up from your phone" on its first screen instead, which listens the same way.
-- Phone: Settings → Devices → "Pair with a computer" opens the camera (permission asked then) and
-  scans the code. Then:
-  - both hold the same diary (same vault id): they store each other as peers and sync right away;
-  - the computer has no diary: the phone sends it this one as an encrypted `.secrt` archive (the
-    backup format, staged in a temp file on both sides), and the user types the diary's password
-    or recovery key on the computer, which restores it with the backup code path and keeps the
-    phone as a peer;
+- Showing a code: Settings → Devices. While that screen is open (and the diary unlocked) the device
+  listens on TCP port 47820 (any free port if taken), and "Show a code" shows a QR code.
+- Scanning: Settings → Devices → "Scan a code" (phones) opens the camera (permission asked then).
+  Then, by what each side holds:
+  - the same diary (same vault id): they store each other as peers and sync right away;
+  - the shower has no diary (a computer on its first screen, "Set up from your phone", which listens
+    the same way): the scanner sends it this one as an encrypted `.secrt` archive (the backup
+    format, staged in a temp file on both sides), and the user types the diary's password or
+    recovery key on the computer, which restores it with the backup code path and keeps the phone
+    as a peer;
   - different diaries: both refuse, nothing is stored or sent.
-- Later: "Sync now" next to a paired computer on the phone. Both apps open and unlocked, the
-  computer showing Devices. "Forget" (either side) unpairs: the other side is then rejected.
+- Setting up a phone from another device (a lost phone while the computer still has the diary, or
+  a second phone): "Set up from another device" on the phone's first screen opens the scanner. It
+  scans the code shown by a device that has the diary, which sends it the same `.secrt` archive;
+  the user types the diary's password or recovery key on the new phone, and both keep each other as
+  peers. The shower's user showing the (one-time, 5-minute) code is the consent, as for pairing.
+  If the shower has no diary either, the scanner says so and nothing is sent.
+- Later: "Sync now" next to a peer this device scanned. Both apps open and unlocked, the other one
+  showing Devices. "Forget" (either side) unpairs: the other side is then rejected.
 
 **Pairing code (QR).** `secrt-pair:` + base64url of `version | port | IPv4 addresses (≤ 4) |
-computer identity public key (32) | pairing secret (32)`. The secret is 256 random bits, valid for
-5 minutes and for one successful pairing (failed attempts don't burn it: guessing 256 bits isn't
-possible, and burning would let anyone on the network cancel pairings). "New code" replaces it.
+showing device's identity public key (32) | pairing secret (32)`. The secret is 256 random bits,
+valid for 5 minutes and for one successful pairing (failed attempts don't burn it: guessing 256 bits
+isn't possible, and burning would let anyone on the network cancel pairings). "New code" replaces it.
 
-**Handshake** (SIGMA-I style, all libsodium; `Handshake.kt`). I = phone, R = computer, `eX` fresh
+**Handshake** (SIGMA-I style, all libsodium; `Handshake.kt`). I = scanner, R = shower, `eX` fresh
 X25519 keys, `idX` Ed25519 identities, `S` the pairing secret, `H` BLAKE2b-256:
 ```
 I -> R  "SECRTLAN" | version | mode (pair/sync) | eI                       plaintext, 42 bytes
@@ -198,11 +210,13 @@ h1 = H(first message | eR)          h2 = H(h1 | idR | sig_R)          MAC = keye
 - Session keys: libsodium `crypto_kx` over the ephemeral keys, then each direction's key =
   keyed BLAKE2b(kx key, label | h1), which binds them to the mode and both ephemerals. Ephemeral
   secrets are wiped after the exchange: forward secrecy.
-- The phone accepts R only if `idR` equals the key it expects (from the QR code, or the stored peer)
+- I accepts R only if `idR` equals the key it expects (from the QR code, or the stored peer)
   and the signature verifies; when pairing, R's MAC proves R saw the same code.
 - R accepts I when pairing only if I's MAC verifies with the current, unexpired secret; when syncing,
-  only if `idI` is a stored peer. Rejections after authentication send an encrypted reason, so the
-  phone can say "pair again" or "code expired".
+  only if `idI` is a stored peer. Rejections after authentication send an encrypted reason, so I
+  can say "pair again" or "code expired".
+- A side without a diary has no database for its identity yet: it uses a provisional identity for
+  the handshake and saves it once the received diary opens, so later syncs authenticate.
 - Identities travel encrypted, so a passive observer can't tell which devices talk.
 
 **Framing.** `length (4) | XChaCha20-Poly1305(key of that direction, nonce = frame counter)`.
@@ -210,8 +224,18 @@ Counters make frames impossible to drop, replay or reorder unnoticed; conversati
 explicit messages (`done`, `archiveEnd`), so a cut connection is never taken as complete. Frames are
 at most 24 MiB (one 20 MB attachment); reads time out (15 s handshake, 2 min per frame).
 
+**After the handshake: `hello`** both ways (I first): name, device id, vault id. A `null` vault id
+means "no diary yet, set me up" (defined that way from the start, so no version bump was needed):
+- I has none, R has one (pair mode only): R answers with its hello and sends the archive
+  (`archive`, chunks, `archiveEnd`; I confirms with `received`). Both pair; R learns I's device id
+  at the first sync (restoring gives a new one).
+- I has one, R has none (R is a computer listening for "Set up from your phone"): the other way round.
+- Neither: R refuses with `failure(NoDiary)`. Same vault id: sync. Different: `failure(DifferentDiary)`.
+- A host from before this answers a diary-less hello with `DifferentDiary`; the scanner reports it
+  as "update secrt on the other device".
+
 **Sync protocol** (`SyncExchange.kt`), strictly taking turns so neither side blocks on a full TCP
-buffer: `hello` both ways (name, device id, vault id); version vectors both ways; I sends the
+buffer: hellos as above; version vectors both ways; I sends the
 revisions R lacks (`DiaryStore.revisionsSince`, which marks them shared) in batches; R asks for the
 attachments those revisions reference that it lacks, receives them as stored (encrypted; verified
 with `BlobStore.putEncrypted`), then applies the revisions with `applyRemote`; the same in the other
@@ -223,21 +247,30 @@ checked: sizes, revision shape (id = `deviceId:seq`, payload parses as its recor
 no payload), version vectors, attachment ids (64 hex chars, so they can't be paths), and attachments
 only answer requests for blobs the sent revisions reference.
 
-**Finding the computer again: remembered address, not mDNS.** The phone stores the address that
-worked (plus the others from the code) and the port; the computer always tries the same port. On
-"Sync now" the phone tries them in order (4 s each). If the computer's IP changed (new network,
+**Finding the other device again: remembered address, not mDNS.** The scanner stores the address
+that worked (plus the others from the code) and the port; the shower always tries the same port. On
+"Sync now" the scanner tries them in order (4 s each). If the shower's IP changed (new network,
 DHCP), scanning a new pairing code updates the stored addresses (pairing again keeps the history).
+Two phones can each scan the other's code, and then either can start a sync.
 Chosen over mDNS because it needs no multicast permissions, works on networks that block multicast,
 and has no flaky platform discovery code; mDNS discovery of paired devices is in the backlog.
 
-**Platform pieces.** Sockets: `ktor-network` in common code. QR drawing: ZXing (`qrModules`,
-desktop). Scanning: CameraX preview + ZXing decoding of the luminance plane (no Play services).
-Android permissions: `INTERNET`, `CAMERA`. Debug builds only: a pairing code can be fed through the
-intent extra `io.github.igrvlhlb.secrt.debug.PAIRING_LINK` (`app/android/src/debug`); release builds
-compile a no-op, so the hook doesn't exist there.
+**Platform pieces.** Sockets: `ktor-network` in common code, server sockets included (the phone
+listens too). QR drawing: ZXing (`qrModules`, both platforms). Scanning: CameraX preview + ZXing
+decoding of the luminance plane (no Play services). Addresses in a code: site-local IPv4 of the
+interfaces that are up; on Android, mobile-data interfaces (`rmnet*`, `ccmni*`, …) are left out.
+Android permissions: `INTERNET`, `CAMERA`. Local network access (incoming and outgoing) needs nothing
+more while `targetSdk` is 36: Android 16 only enforces it for apps that opt in, and below target 37
+`INTERNET` implies it. Targeting 37 (Android 17) will need `ACCESS_LOCAL_NETWORK` (runtime, in the
+Nearby devices group) declared and requested before pairing, syncing or showing a code; Google asks
+not to request it earlier. Debug builds only: a pairing code can be fed through the intent extra
+`io.github.igrvlhlb.secrt.debug.PAIRING_LINK` (`app/android/src/debug`), on the Devices screen or,
+before there is a diary, on "Set up from another device"; with the app already open, pass
+`--activity-single-top` to `am start` so the intent reaches it. Release builds compile a no-op, so the
+hook doesn't exist there.
 
 **Not done yet** (see BACKLOG.md): numeric-code pairing with a PAKE, mDNS discovery, the computer
-starting a sync, phone ↔ phone, iOS.
+starting a sync, computer ↔ computer, asking before sending a diary, iOS.
 
 ## Module layout
 ```
