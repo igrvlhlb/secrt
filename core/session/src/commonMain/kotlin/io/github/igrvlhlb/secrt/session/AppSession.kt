@@ -79,6 +79,9 @@ class AppSession(
     /** Whether the lock screen offers the fingerprint. Off unless the user turned it on. */
     val biometricUnlockEnabled: StateFlow<Boolean> = _biometricUnlockEnabled.asStateFlow()
 
+    /** The open diary's id; `null` while locked. Two devices sync only when they hold the same diary. */
+    val vaultId: String? get() = keys?.vaultId
+
     fun biometricAvailability(): BiometricAvailability = biometrics?.availability() ?: BiometricAvailability.Unsupported
 
     /** Creates the vault and unlocks it. @return the recovery key to show once, if requested. */

@@ -32,6 +32,7 @@ include(
     ":core:storage",
     ":core:archive",
     ":core:session",
+    ":core:lan",
     ":ui",
     ":app:android",
     ":app:desktop",
