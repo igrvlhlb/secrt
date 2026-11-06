@@ -12,8 +12,5 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.okio.fakefilesystem)
         }
-        jvmTest.dependencies {
-            implementation(libs.sqldelight.jvm.driver)
-        }
     }
 }

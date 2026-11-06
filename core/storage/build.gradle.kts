@@ -29,8 +29,13 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
             implementation(libs.okio.fakefilesystem)
         }
-        jvmTest.dependencies {
-            implementation(libs.sqldelight.jvm.driver)
+        jvmMain.dependencies {
+            // SQLDelight's JDBC driver, running on sqlite-jdbc-crypt instead of xerial's sqlite-jdbc.
+            // Both ship the `org.sqlite` classes, so the plain one must never reach the classpath.
+            api(libs.sqldelight.jvm.driver.get().toString()) {
+                exclude(group = "org.xerial", module = "sqlite-jdbc")
+            }
+            implementation(libs.sqlite.jdbc.crypt)
         }
     }
 }

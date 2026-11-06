@@ -20,6 +20,7 @@ okio = "3.18.2"
 sqldelight = "2.4.1"
 sqlcipher-android = "4.20.0"
 androidx-sqlite = "2.7.1"
+sqlite-jdbc-crypt = "3.53.4.0"
 libsodium = "0.9.5"
 
 [libraries]
@@ -44,6 +45,8 @@ sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", ver
 sqldelight-jvm-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 sqlcipher-android = { module = "net.zetetic:sqlcipher-android", version.ref = "sqlcipher-android" }
 androidx-sqlite = { module = "androidx.sqlite:sqlite", version.ref = "androidx-sqlite" }
+# sqlite-jdbc fork bundling SQLite3MultipleCiphers (SQLCipher-compatible); replaces org.xerial:sqlite-jdbc.
+sqlite-jdbc-crypt = { module = "io.github.willena:sqlite-jdbc", version.ref = "sqlite-jdbc-crypt" }
 
 compose-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
 compose-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
