@@ -1,5 +1,8 @@
 # secrt — Encrypted, local-first diary app: architecture & roadmap
 
+> Design reference: decisions, formats and protocols. For a guided tour of how the app works,
+> start with [docs/README.md](README.md).
+
 ## Context
 Greenfield project (repo holds only `idea.txt` + `AGENTS.md`). Goal: a private diary whose data lives
 encrypted on the user's own devices, with **no mandatory server cost**. Optional, user-triggered
