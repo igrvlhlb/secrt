@@ -15,6 +15,6 @@ class MainActivity : ComponentActivity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         val app = application as SecrtApplication
-        setContent { SecrtApp(app.session, app.backgroundScope) }
+        setContent { SecrtApp(app.session, app.backgroundScope, app.autoLock) }
     }
 }

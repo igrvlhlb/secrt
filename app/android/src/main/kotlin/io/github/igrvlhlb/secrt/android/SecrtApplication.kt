@@ -4,6 +4,7 @@ import android.app.Application
 import io.github.igrvlhlb.secrt.crypto.SodiumCrypto
 import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.storage.SqlCipherDriverFactory
+import io.github.igrvlhlb.secrt.ui.AutoLock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,4 +25,7 @@ class SecrtApplication : Application() {
             ioDispatcher = Dispatchers.IO,
         )
     }
+
+    /** Per process, not per activity: its timer must survive the activity being recreated or closed. */
+    val autoLock: AutoLock by lazy { AutoLock(session, backgroundScope) }
 }

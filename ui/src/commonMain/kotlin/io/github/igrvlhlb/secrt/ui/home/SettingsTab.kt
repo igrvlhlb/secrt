@@ -46,7 +46,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material3.RadioButton
+import androidx.compose.ui.semantics.Role
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.igrvlhlb.secrt.session.AppSession
+import io.github.igrvlhlb.secrt.session.AutoLockTimeout
 import io.github.igrvlhlb.secrt.ui.auth.MIN_PASSWORD_LENGTH
 import io.github.igrvlhlb.secrt.ui.auth.PasswordField
 import io.github.igrvlhlb.secrt.ui.auth.RecoveryKeyCard
@@ -65,6 +75,8 @@ fun SettingsTab(session: AppSession) {
     var shownKey by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf<String?>(null) }
     val autoLock = LocalAutoLock.current
+    val settings by session.settings.collectAsStateWithLifecycle()
+    var choosingAutoLock by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { hasRecoveryKey = session.hasRecoveryKey() }
 
     /** Runs a backup operation with a blocking progress dialog, reporting failures in the snackbar. */
@@ -148,7 +160,9 @@ fun SettingsTab(session: AppSession) {
                 }
             }
             ElevatedCard {
-                SettingRow(Icons.Outlined.Lock, "Lock now", "The diary also locks a minute after you leave the app") { scope.launch { session.lock() } }
+                SettingRow(Icons.Outlined.Timer, "Auto-lock", settings.autoLock.description) { choosingAutoLock = true }
+                HorizontalDivider()
+                SettingRow(Icons.Outlined.Lock, "Lock now", "Close the diary until you unlock it again") { scope.launch { session.lock() } }
             }
             ElevatedCard {
                 ListItem(
@@ -167,6 +181,16 @@ fun SettingsTab(session: AppSession) {
         }
     }
 
+    if (choosingAutoLock) {
+        AutoLockDialog(
+            current = settings.autoLock,
+            onSelect = { option ->
+                choosingAutoLock = false
+                scope.launch { session.updateSettings { it.copy(autoLock = option) } }
+            },
+            onDismiss = { choosingAutoLock = false },
+        )
+    }
     if (changingPassword) {
         ChangePasswordDialog(
             onChange = { current, new -> session.changePassword(current, new); snackbar.showSnackbar("Password changed") },
@@ -227,6 +251,54 @@ private fun SettingRow(icon: ImageVector, title: String, subtitle: String, onCli
         headlineContent = { Text(title) },
         supportingContent = { if (subtitle.isNotEmpty()) Text(subtitle) },
         modifier = Modifier.clickable(onClick = onClick),
+    )
+}
+
+private val AutoLockTimeout.label: String
+    get() = when (this) {
+        AutoLockTimeout.Immediately -> "Immediately"
+        AutoLockTimeout.OneMinute -> "After 1 minute"
+        AutoLockTimeout.FiveMinutes -> "After 5 minutes"
+        AutoLockTimeout.FifteenMinutes -> "After 15 minutes"
+        AutoLockTimeout.OneHour -> "After 1 hour"
+        AutoLockTimeout.OnAppRestart -> "When the app restarts"
+    }
+
+private val AutoLockTimeout.description: String
+    get() = when (this) {
+        AutoLockTimeout.Immediately -> "As soon as you leave the app"
+        AutoLockTimeout.OnAppRestart -> "Only when the app is closed or the phone restarts"
+        else -> "$label in the background"
+    }
+
+@Composable
+private fun AutoLockDialog(current: AutoLockTimeout, onSelect: (AutoLockTimeout) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Lock the diary") },
+        text = {
+            Column(Modifier.selectableGroup()) {
+                AutoLockTimeout.entries.forEach { option ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                            .selectable(selected = option == current, role = Role.RadioButton, onClick = { onSelect(option) })
+                            .padding(vertical = 12.dp),
+                    ) {
+                        RadioButton(selected = option == current, onClick = null)
+                        Spacer(Modifier.width(16.dp))
+                        Text(option.label)
+                    }
+                }
+                Text(
+                    "Time the app can spend in the background before it asks for your password again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

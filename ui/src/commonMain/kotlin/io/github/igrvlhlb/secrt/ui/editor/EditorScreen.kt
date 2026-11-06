@@ -50,6 +50,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,6 +106,8 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.flush() }
+    // With "lock immediately" the diary closes right as the app leaves; the save must land first.
+    DisposableEffect(vm, autoLock) { onDispose(autoLock.beforeLock(vm::saveNow)) }
     LaunchedEffect(vm.notFound) { if (vm.notFound) onClose() }
     LaunchedEffect(vm.message) {
         vm.message?.let {

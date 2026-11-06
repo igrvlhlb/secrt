@@ -42,7 +42,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Security & privacy
 - [ ] Biometric unlock (DEK wrapped by Android Keystore / iOS Keychain)
-- [ ] Configurable auto-lock timeout (currently fixed)
+- [x] Configurable auto-lock timeout (immediately … 1 hour, or only on app restart), kept in a plaintext
+      `settings.json` readable while locked
 - [ ] Review memory hygiene: passwords are `String`s today and cannot be wiped
 - [ ] Screenshot protection toggle (FLAG_SECURE is always on for now)
 

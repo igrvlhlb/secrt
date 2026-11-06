@@ -34,7 +34,12 @@ decisions and core architecture first, then features, then UI/UX.
   - Recovery slot (optional): random 128+ bit key shown as words/groups → wraps the same DEK.
   - Password change = rewrap the DEK only; no re-encryption.
 - Device identity: Ed25519/X25519 keypair per device, stored inside the encrypted DB. Used for pairing and the LAN channel.
-- Desktop always asks for the password on open (per notes). Mobile biometric unlock (DEK wrapped by Keystore/Keychain) comes later. Auto-lock on idle.
+- Desktop always asks for the password on open (per notes). Mobile biometric unlock (DEK wrapped by Keystore/Keychain) comes later.
+- Auto-lock after the app spends a user-chosen time in the background (default 1 minute; also
+  "immediately" and "only on app restart"). A timer closes the database while the app is away and
+  the elapsed time is checked again on return, in case the system froze the process. Settings that
+  must work while locked live in a small plaintext `settings.json` next to `vault.key`; nothing in
+  it is sensitive.
 
 ## Data model (`core:storage`, SQLDelight)
 - `revision(rev_id, record_type, record_id, parent_rev_ids, device_id, seq, hlc, deleted, payload)`: **source of truth**, append-only.

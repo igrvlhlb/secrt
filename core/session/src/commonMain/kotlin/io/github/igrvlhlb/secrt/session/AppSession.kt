@@ -42,6 +42,8 @@ sealed interface SessionState {
 /**
  * Owns the vault's lifecycle: creating it, unlocking it into an open [DiaryStore], and locking it
  * again (closing the database and wiping keys from memory).
+ *
+ * @param settingsFile where [settings] are kept: plaintext, readable while locked.
  */
 class AppSession(
     private val fileSystem: FileSystem,
@@ -50,6 +52,7 @@ class AppSession(
     private val cryptoProvider: suspend () -> Crypto,
     private val ioDispatcher: CoroutineDispatcher,
     private val argon2Params: Argon2Params = Argon2Params.Default,
+    settingsFile: Path = vaultDirectory / "settings.json",
 ) {
     private val lock = Mutex()
     private var keys: VaultKeys? = null
@@ -60,6 +63,13 @@ class AppSession(
         if (fileSystem.exists(vaultDirectory / "vault.key")) SessionState.Locked else SessionState.NoVault,
     )
     val state: StateFlow<SessionState> = _state.asStateFlow()
+
+    private val settingsStore = AppSettingsStore(fileSystem, settingsFile)
+
+    /** App preferences. Available while locked. */
+    val settings: StateFlow<AppSettings> get() = settingsStore.settings
+
+    suspend fun updateSettings(transform: (AppSettings) -> AppSettings) = withContext(ioDispatcher) { settingsStore.update(transform) }
 
     /** Creates the vault and unlocks it. @return the recovery key to show once, if requested. */
     suspend fun create(password: String, withRecoveryKey: Boolean): String? = io {

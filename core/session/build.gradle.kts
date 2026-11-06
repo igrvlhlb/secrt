@@ -1,5 +1,6 @@
 plugins {
     id("secrt.kmp-library")
+    id("org.jetbrains.kotlin.plugin.serialization")
 }
 
 kotlin {
