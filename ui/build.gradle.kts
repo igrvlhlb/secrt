@@ -9,6 +9,7 @@ kotlin {
         commonMain.dependencies {
             api(projects.core.session)
             implementation(projects.core.backup)
+            api(projects.core.lan)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.ui)
@@ -22,6 +23,15 @@ kotlin {
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
+            // Scanning the computer's pairing QR code.
+            implementation(libs.androidx.camera.camera2)
+            implementation(libs.androidx.camera.lifecycle)
+            implementation(libs.androidx.camera.view)
+            implementation(libs.zxing.core)
+        }
+        jvmMain.dependencies {
+            // Drawing the pairing QR code.
+            implementation(libs.zxing.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)

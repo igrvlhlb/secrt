@@ -33,6 +33,7 @@ include(
     ":core:archive",
     ":core:backup",
     ":core:session",
+    ":core:lan",
     ":ui",
     ":app:android",
     ":app:desktop",

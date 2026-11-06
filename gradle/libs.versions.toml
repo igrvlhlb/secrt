@@ -24,7 +24,9 @@ sqlcipher-android = "4.20.0"
 androidx-sqlite = "2.7.1"
 sqlite-jdbc-crypt = "3.53.4.0"
 libsodium = "0.9.5"
-ktor = "3.6.0"
+ktor = "3.6.1"
+zxing = "3.5.4"
+camerax = "1.6.2"
 
 [libraries]
 # Gradle plugins, consumed by build-logic
@@ -45,6 +47,13 @@ okio-fakefilesystem = { module = "com.squareup.okio:okio-fakefilesystem", versio
 libsodium-bindings = { module = "com.ionspin.kotlin:multiplatform-crypto-libsodium-bindings", version.ref = "libsodium" }
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+# TCP sockets for LAN sync, in common code (JVM and Android today, iOS later).
+ktor-network = { module = "io.ktor:ktor-network", version.ref = "ktor" }
+# QR codes: drawn on the desktop, decoded from camera frames on Android.
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }
 sqldelight-coroutines = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }

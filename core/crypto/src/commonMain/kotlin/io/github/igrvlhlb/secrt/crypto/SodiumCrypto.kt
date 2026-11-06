@@ -1,12 +1,16 @@
 package io.github.igrvlhlb.secrt.crypto
 
+import com.ionspin.kotlin.crypto.GeneralLibsodiumException
 import com.ionspin.kotlin.crypto.LibsodiumInitializer
 import com.ionspin.kotlin.crypto.aead.AeadCorrupedOrTamperedDataException
 import com.ionspin.kotlin.crypto.aead.AuthenticatedEncryptionWithAssociatedData
 import com.ionspin.kotlin.crypto.generichash.GenericHash
 import com.ionspin.kotlin.crypto.kdf.Kdf
+import com.ionspin.kotlin.crypto.keyexchange.KeyExchange
 import com.ionspin.kotlin.crypto.pwhash.PasswordHash
 import com.ionspin.kotlin.crypto.pwhash.crypto_pwhash_argon2id_ALG_ARGON2ID13
+import com.ionspin.kotlin.crypto.signature.InvalidSignatureException
+import com.ionspin.kotlin.crypto.signature.Signature
 import com.ionspin.kotlin.crypto.util.LibsodiumRandom
 import com.ionspin.kotlin.crypto.util.LibsodiumUtil
 
@@ -52,6 +56,54 @@ class SodiumCrypto private constructor() : Crypto {
 
     override fun keyedHash(key: ByteArray, data: ByteArray, outputLength: Int): ByteArray =
         GenericHash.genericHash(data.asUByteArray(), outputLength, key.asUByteArray()).asByteArray()
+
+    override fun hash(data: ByteArray, outputLength: Int): ByteArray =
+        GenericHash.genericHash(data.asUByteArray(), outputLength).asByteArray()
+
+    override fun signingKeyPair(): KeyPair = Signature.keypair().let { KeyPair(it.publicKey.asByteArray(), it.secretKey.asByteArray()) }
+
+    override fun signingKeyPairFromSeed(seed: ByteArray): KeyPair {
+        require(seed.size == 32) { "Ed25519 seeds are 32 bytes" }
+        return Signature.seedKeypair(seed.asUByteArray()).let { KeyPair(it.publicKey.asByteArray(), it.secretKey.asByteArray()) }
+    }
+
+    override fun sign(secretKey: ByteArray, message: ByteArray): ByteArray {
+        require(secretKey.size == 64) { "Ed25519 secret keys are 64 bytes" }
+        return Signature.detached(message.asUByteArray(), secretKey.asUByteArray()).asByteArray()
+    }
+
+    override fun verifySignature(publicKey: ByteArray, message: ByteArray, signature: ByteArray): Boolean {
+        if (publicKey.size != Crypto.PUBLIC_KEY_BYTES || signature.size != Crypto.SIGNATURE_BYTES) return false
+        return try {
+            Signature.verifyDetached(signature.asUByteArray(), message.asUByteArray(), publicKey.asUByteArray())
+            true
+        } catch (e: InvalidSignatureException) {
+            false
+        }
+    }
+
+    override fun keyExchangeKeyPair(): KeyPair = KeyExchange.keypair().let { KeyPair(it.publicKey.asByteArray(), it.secretKey.asByteArray()) }
+
+    override fun clientSessionKeys(clientKeyPair: KeyPair, serverPublicKey: ByteArray): SessionKeys {
+        require(serverPublicKey.size == Crypto.PUBLIC_KEY_BYTES) { "X25519 public keys are 32 bytes" }
+        // libsodium rejects low-order points (all-zero shared secret) with an error.
+        val keys = try {
+            KeyExchange.clientSessionKeys(clientKeyPair.publicKey.asUByteArray(), clientKeyPair.secretKey.asUByteArray(), serverPublicKey.asUByteArray())
+        } catch (e: GeneralLibsodiumException) {
+            throw IllegalArgumentException("Unusable public key", e)
+        }
+        return SessionKeys(receive = keys.receiveKey.asByteArray(), send = keys.sendKey.asByteArray())
+    }
+
+    override fun serverSessionKeys(serverKeyPair: KeyPair, clientPublicKey: ByteArray): SessionKeys {
+        require(clientPublicKey.size == Crypto.PUBLIC_KEY_BYTES) { "X25519 public keys are 32 bytes" }
+        val keys = try {
+            KeyExchange.serverSessionKeys(serverKeyPair.publicKey.asUByteArray(), serverKeyPair.secretKey.asUByteArray(), clientPublicKey.asUByteArray())
+        } catch (e: GeneralLibsodiumException) {
+            throw IllegalArgumentException("Unusable public key", e)
+        }
+        return SessionKeys(receive = keys.receiveKey.asByteArray(), send = keys.sendKey.asByteArray())
+    }
 
     override fun wipe(bytes: ByteArray) = LibsodiumUtil.memzero(bytes.asUByteArray())
 

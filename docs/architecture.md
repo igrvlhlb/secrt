@@ -33,7 +33,8 @@ decisions and core architecture first, then features, then UI/UX.
   - Password slot: Argon2id(password, salt, params stored in header) → KEK → XChaCha20-Poly1305(DEK).
   - Recovery slot (optional): random 128+ bit key shown as words/groups → wraps the same DEK.
   - Password change = rewrap the DEK only; no re-encryption.
-- Device identity: Ed25519/X25519 keypair per device, stored inside the encrypted DB. Used for pairing and the LAN channel.
+- Device identity: an Ed25519 key pair per replica, its 32-byte seed kept in the encrypted DB (`meta`).
+  Used to authenticate LAN connections; key exchange uses fresh X25519 keys per connection (see below).
 - Desktop always asks for the password on open (per notes).
 - **Biometric unlock (Android, opt-in, off by default).** Turning it on generates an AES-256-GCM key
   in the Android Keystore (StrongBox if the device has one, else the TEE) that requires a Class 3
@@ -61,7 +62,9 @@ decisions and core architecture first, then features, then UI/UX.
   - `entry_label(entry_id, label_id)`: the label set is part of the entry revision.
   - `attachment(blob_id, mime, size, filename)`: referenced from Markdown as `attachment://<blob_id>`.
   - FTS5 table over title/body.
-- `peer(device_id, name, identity_pubkey, version_vector)` and `self(device_id, keys, next_seq)`.
+- `peer(identity_key, name, device_id, paired_at, last_sync_at, addresses, version_vector)` (schema version 2):
+  devices paired for LAN sync. Local to each replica, never synced. This device's id, shared-seq
+  watermark and LAN identity seed live in `meta`.
 - Attachments: encrypted files on disk (libsodium secretstream), **content-addressed** (`blob_id = HMAC(DEK, sha256(plain))`). They are immutable, so they never conflict and are deduplicated.
 - Keeping full revision history is cheap for text and gives "entry history" for free.
 
@@ -160,16 +163,81 @@ secrt/<vaultId>/
 - OAuth: desktop loopback redirect + PKCE; Android Credential Manager/Authorization API; iOS ASWebAuthenticationSession.
 - Plaintext export: zip of `<folder path>/<date>-<title>.md` with YAML front-matter (id, dates, labels), plus `_attachments/` linked relatively.
 
-## LAN pairing & sync (`platform:lan`, `platform:qr`)
-- Phone must explicitly enter **"Add device" mode**. Nothing is advertised otherwise, so desktops never see a list of devices.
-- **Pairing A, QR (first):** desktop shows a QR containing `{ip:port, desktop identity pubkey, one-time secret}`. The phone scans it and connects directly; no discovery is needed. Both prove knowledge of the secret, exchange identity keys, and store each other as `peer`.
-- **Pairing B, numeric code (later):** while in pairing mode the phone advertises over mDNS and shows a 6-digit code, which the user types on the desktop. Uses a PAKE (CPace on ristretto255) so the short code can't be brute-forced offline.
-- After pairing: the desktop gets `vault.key` and the revisions, and the user types the password to unlock (as in your notes).
-- Later syncs: mDNS `_secrt._tcp` advertised only while the app is open on a sync screen. Only paired identities are accepted. The channel uses an authenticated handshake (ephemeral X25519 + identity signatures, then secretstream; Noise XX if a vetted KMP implementation exists).
-- Platform specifics (expect/actual):
-  - Discovery: Android NsdManager, iOS Network.framework (needs `NSLocalNetworkUsageDescription`, `NSBonjourServices`), desktop JmDNS.
-  - QR generation is shared (e.g. `qrose`). Scanning: Android CameraX + ML Kit/ZXing, iOS AVFoundation.
-  - iOS only syncs in the foreground.
+## LAN pairing & sync (`core:lan`, `ui/devices`)
+Implemented for phone ↔ computer. The phone always connects; the computer listens, and only while
+the user keeps a screen open for it. Nothing is advertised on the network.
+
+**User flow**
+- Computer: Settings → Devices. While that screen is open (and the diary unlocked) it listens on TCP
+  port 47820 (any free port if taken), and "Pair a phone" shows a QR code. A computer without a
+  diary offers "Set up from your phone" on its first screen instead, which listens the same way.
+- Phone: Settings → Devices → "Pair with a computer" opens the camera (permission asked then) and
+  scans the code. Then:
+  - both hold the same diary (same vault id): they store each other as peers and sync right away;
+  - the computer has no diary: the phone sends it this one as an encrypted `.secrt` archive (the
+    backup format, staged in a temp file on both sides), and the user types the diary's password
+    or recovery key on the computer, which restores it with the backup code path and keeps the
+    phone as a peer;
+  - different diaries: both refuse, nothing is stored or sent.
+- Later: "Sync now" next to a paired computer on the phone. Both apps open and unlocked, the
+  computer showing Devices. "Forget" (either side) unpairs: the other side is then rejected.
+
+**Pairing code (QR).** `secrt-pair:` + base64url of `version | port | IPv4 addresses (≤ 4) |
+computer identity public key (32) | pairing secret (32)`. The secret is 256 random bits, valid for
+5 minutes and for one successful pairing (failed attempts don't burn it: guessing 256 bits isn't
+possible, and burning would let anyone on the network cancel pairings). "New code" replaces it.
+
+**Handshake** (SIGMA-I style, all libsodium; `Handshake.kt`). I = phone, R = computer, `eX` fresh
+X25519 keys, `idX` Ed25519 identities, `S` the pairing secret, `H` BLAKE2b-256:
+```
+I -> R  "SECRTLAN" | version | mode (pair/sync) | eI                       plaintext, 42 bytes
+R -> I  eR | frame{ idR | sig_R("…responder" | h1 | idR) [| MAC_S("…pair responder" | h1 | idR)] }
+I -> R  frame{ idI | sig_I("…initiator" | h2 | idI) [| MAC_S("…pair initiator" | h2 | idI)] }
+h1 = H(first message | eR)          h2 = H(h1 | idR | sig_R)          MAC = keyed BLAKE2b
+```
+- Session keys: libsodium `crypto_kx` over the ephemeral keys, then each direction's key =
+  keyed BLAKE2b(kx key, label | h1), which binds them to the mode and both ephemerals. Ephemeral
+  secrets are wiped after the exchange: forward secrecy.
+- The phone accepts R only if `idR` equals the key it expects (from the QR code, or the stored peer)
+  and the signature verifies; when pairing, R's MAC proves R saw the same code.
+- R accepts I when pairing only if I's MAC verifies with the current, unexpired secret; when syncing,
+  only if `idI` is a stored peer. Rejections after authentication send an encrypted reason, so the
+  phone can say "pair again" or "code expired".
+- Identities travel encrypted, so a passive observer can't tell which devices talk.
+
+**Framing.** `length (4) | XChaCha20-Poly1305(key of that direction, nonce = frame counter)`.
+Counters make frames impossible to drop, replay or reorder unnoticed; conversations end with
+explicit messages (`done`, `archiveEnd`), so a cut connection is never taken as complete. Frames are
+at most 24 MiB (one 20 MB attachment); reads time out (15 s handshake, 2 min per frame).
+
+**Sync protocol** (`SyncExchange.kt`), strictly taking turns so neither side blocks on a full TCP
+buffer: `hello` both ways (name, device id, vault id); version vectors both ways; I sends the
+revisions R lacks (`DiaryStore.revisionsSince`, which marks them shared) in batches; R asks for the
+attachments those revisions reference that it lacks, receives them as stored (encrypted; verified
+with `BlobStore.putEncrypted`), then applies the revisions with `applyRemote`; the same in the other
+direction; `done` both ways. Attachments are stored before the revisions that reference them, so an
+interrupted sync can't leave entries pointing at attachments no later sync would send.
+
+**Validation.** Nothing is read before the channel authenticates. After that, every message is still
+checked: sizes, revision shape (id = `deviceId:seq`, payload parses as its record type, deletion iff
+no payload), version vectors, attachment ids (64 hex chars, so they can't be paths), and attachments
+only answer requests for blobs the sent revisions reference.
+
+**Finding the computer again: remembered address, not mDNS.** The phone stores the address that
+worked (plus the others from the code) and the port; the computer always tries the same port. On
+"Sync now" the phone tries them in order (4 s each). If the computer's IP changed (new network,
+DHCP), scanning a new pairing code updates the stored addresses (pairing again keeps the history).
+Chosen over mDNS because it needs no multicast permissions, works on networks that block multicast,
+and has no flaky platform discovery code; mDNS discovery of paired devices is in the backlog.
+
+**Platform pieces.** Sockets: `ktor-network` in common code. QR drawing: ZXing (`qrModules`,
+desktop). Scanning: CameraX preview + ZXing decoding of the luminance plane (no Play services).
+Android permissions: `INTERNET`, `CAMERA`. Debug builds only: a pairing code can be fed through the
+intent extra `io.github.igrvlhlb.secrt.debug.PAIRING_LINK` (`app/android/src/debug`); release builds
+compile a no-op, so the hook doesn't exist there.
+
+**Not done yet** (see BACKLOG.md): numeric-code pairing with a PAKE, mDNS discovery, the computer
+starting a sync, phone ↔ phone, iOS.
 
 ## Module layout
 ```
@@ -181,8 +249,8 @@ core/storage        SQLDelight schema, repositories, expect DriverFactory (SQLCi
 core/sync           version vectors, merge engine, protocol messages
 core/archive        segment format, .secrt import/export, Markdown export
 core/backup         BackupTarget + WebDAV, Google Drive
-platform/lan        expect/actual sockets + mDNS
-platform/qr         QR render (common) + scanner (android/ios)
+core/lan            LAN pairing & sync: handshake, encrypted channel, sync protocol (ktor-network sockets)
+ui/devices          Devices screen, QR code drawing and scanning (CameraX + ZXing on Android)
 feature/*           UI screens (later)
 app/android, app/desktop, iosApp (Xcode)
 ```
@@ -196,8 +264,9 @@ Rule: `core/*` is `commonMain` only, apart from the `DriverFactory` and crypto a
   attachments) and `secrt.db` (SQLCipher-encrypted via `sqlite-jdbc-crypt`).
 - To use another directory, e.g. a throwaway diary: `-Psecrt.dataDir=/some/dir` on `run`, or
   `-Dsecrt.dataDir=…` / `SECRT_DATA_DIR=…` for the packaged app.
-- To move a diary from the phone: export a backup in Settings, then pick "Restore from a backup file"
-  on the desktop's first screen.
+- To move a diary from the phone: pick "Set up from your phone" on the desktop's first screen and
+  scan its code from the phone (Settings → Devices), or export a backup in Settings and pick
+  "Restore from a backup file". Afterwards, Settings → Devices on both keeps them in sync.
 
 ## Roadmap
 0. **Spikes:**

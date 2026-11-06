@@ -38,6 +38,7 @@ fun main() {
         exitProcess(1)
     }
     val session = desktopSession(dataDirectory)
+    val lan = desktopLanSync(session, dataDirectory)
     val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     integrateWithDesktop(session)
 
@@ -52,7 +53,7 @@ fun main() {
             ) {
                 // Narrower than this, the phone layout starts to clip.
                 LaunchedEffect(Unit) { window.minimumSize = Dimension(400, 560) }
-                SecrtApp(session, backgroundScope)
+                SecrtApp(session, backgroundScope, lan = lan)
             }
         } else {
             LaunchedEffect(Unit) {

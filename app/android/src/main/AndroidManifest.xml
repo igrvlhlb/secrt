@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Cloud backup to the user's own WebDAV server; only ever used when they ask for it. -->
+    <!-- Network: cloud backup to the user's own WebDAV server, and LAN sync with their computer.
+         Both only run when the user asks for them. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Scanning the computer's pairing QR code; asked for only when the scanner opens. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <!--
         Backups are off on purpose: the diary only leaves the device when the user asks for it

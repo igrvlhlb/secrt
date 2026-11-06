@@ -11,12 +11,20 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [x] Compose UI: setup/unlock, journal, folders, labels, editor, settings
 
 ## Sync & devices
-- [ ] LAN pairing via QR: **desktop generates the QR**, phone scans it (deferred on purpose)
+- [x] LAN pairing via QR: the computer shows a one-time code, the phone scans it (CameraX + ZXing)
+- [x] Set up a computer from the phone: it receives the encrypted diary and opens it with the password
 - [ ] Numeric-code pairing with a PAKE (CPace on ristretto255)
-- [ ] Authenticated, encrypted LAN channel (ephemeral X25519 + identity signatures, or Noise XX)
-- [ ] mDNS discovery of already-paired devices (Android NsdManager, iOS Network.framework, desktop JmDNS)
-- [ ] Sync protocol over the channel (exchange version vectors, then missing revisions)
-- [ ] Peer table: paired devices, names, identity keys, last-seen version vectors
+- [x] Authenticated, encrypted LAN channel (ephemeral X25519 via crypto_kx + Ed25519 identity signatures, SIGMA-I style)
+- [ ] mDNS discovery of already-paired devices (Android NsdManager, iOS Network.framework, desktop JmDNS);
+      today the phone remembers the computer's address and fixed port, and a new pairing code updates them
+- [x] Sync protocol over the channel (exchange version vectors, then missing revisions and attachments)
+- [ ] Start a sync from the computer (today only the phone connects; the computer listens on its Devices screen)
+- [ ] Sync on its own while both apps are open (today: "Sync now")
+- [ ] Phone ↔ phone and computer ↔ computer pairing (a device that can both scan and show codes)
+- [ ] Stream sync batches instead of holding all received revisions in memory until the end
+- [ ] Re-request attachments still missing locally (today only those referenced by revisions received in that sync)
+- [ ] Show the other device's identity fingerprint, so users can compare it after pairing
+- [x] Peer table: paired devices, names, identity keys, remembered addresses, last sync, last-seen version vectors
 - [x] "Shared seq" watermark: `DiaryStore.revisionsSince` marks what it returns as shared, so
       revisions that left the device are never amended in place. New transports must export through it.
 - [ ] Conflict resolution UI: side-by-side versions, pick one or merge by hand (data layer is done)
@@ -46,7 +54,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Platforms
 - [x] Desktop (JVM) app module: window, file pickers, encrypted DB via `sqlite-jdbc-crypt`, restore from a phone backup
-- [ ] Desktop: generate the pairing QR code
+- [x] Desktop: generate the pairing QR code
 - [ ] Desktop: sign and notarize the macOS app (today the `.dmg` is unsigned, so Gatekeeper blocks it); `.icns` icon
 - [ ] Desktop: Windows/Linux packages built and tried on those OSes (declared, never built)
 - [ ] Desktop: idle auto-lock while the window stays open; today it locks after being minimized for a
@@ -57,6 +65,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] Web client (in-browser, talks to WebDAV/Drive backups directly; no LAN sync)
 
 ## Security & privacy
+- [ ] LAN join: ask on the phone "Send your encrypted diary to <computer>?" before sending it to a computer that has no diary yet. Today scanning the QR code is the only consent, so a scanned QR from an attacker's machine yields the encrypted diary for offline password guessing.
 - [x] Biometric unlock on Android, opt-in: DEK wrapped by an AES-GCM Android Keystore key (StrongBox when
       present) that needs a Class 3 biometric for every use and dies when fingerprints change
 - [ ] Biometric unlock on iOS (Keychain + LocalAuthentication)
