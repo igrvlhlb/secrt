@@ -129,6 +129,8 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
     /** @return whether a diary was received (joining), which ends listening. */
     private suspend fun serve(connection: Connection, crypto: Crypto): Boolean {
         var peerName = "A device"
+        // Before authentication, failures are whoever knocked (a port scan, a stale phone): not worth telling the user.
+        var authenticated = false
         try {
             val identity = identity(crypto) ?: return false
             val policy = Policy(identity)
@@ -137,6 +139,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
             } finally {
                 crypto.wipe(identity.secretKey)
             }
+            authenticated = true
             val messages = MessageChannel(channel)
             val hello = messages.expect<Hello>()
             peerName = hello.deviceName.clean()
@@ -177,9 +180,9 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
         } catch (e: CancellationException) {
             throw e
         } catch (e: LanException) {
-            _events.tryEmit(Event.Failed(e.message ?: "Sync failed"))
+            if (authenticated) _events.tryEmit(Event.Failed(e.message ?: "Sync failed"))
         } catch (e: ConnectionClosedException) {
-            _events.tryEmit(Event.Failed("The connection to $peerName was lost."))
+            if (authenticated) _events.tryEmit(Event.Failed("The connection to $peerName was lost."))
         } catch (e: StoreClosedException) {
             // Locked meanwhile; the screen is going away.
         } catch (e: Exception) {
