@@ -23,16 +23,18 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /**
- * State of the Devices screen. On a computer it also owns the [host], which listens for as long
- * as the screen (and so this ViewModel) exists.
+ * State of the Devices screen. It owns the [host], which listens for the user's other devices for
+ * as long as the screen (and so this ViewModel) exists.
+ *
+ * @param canScan whether this device scans codes, and so also takes codes handed in some other way.
  */
-internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, computer: Boolean) : ViewModel() {
+internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, canScan: Boolean) : ViewModel() {
 
     val peers: StateFlow<List<Peer>> = store.peers.observe().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val host: LanHost? = if (computer) lan.host() else null
+    val host: LanHost = lan.host()
 
-    /** What the phone is doing right now; `null` when idle. */
+    /** What this device is doing as the one that scanned a code; `null` when idle. */
     var progress by mutableStateOf<String?>(null)
         private set
 
@@ -49,20 +51,19 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, com
     val snackbar = _snackbar.receiveAsFlow()
 
     init {
-        host?.let { host ->
-            viewModelScope.launch { host.run() }
-            viewModelScope.launch {
-                host.events.collect { event ->
-                    when (event) {
-                        is LanHost.Event.Paired -> _snackbar.send("Paired with ${event.peerName}")
-                        is LanHost.Event.Synced -> _snackbar.send("Synced with ${event.peerName}: ${event.stats.describe()}")
-                        is LanHost.Event.Failed -> _snackbar.send(event.message)
-                        is LanHost.Event.DiaryReceived -> Unit
-                    }
+        viewModelScope.launch { host.run() }
+        viewModelScope.launch {
+            host.events.collect { event ->
+                when (event) {
+                    is LanHost.Event.Paired -> _snackbar.send("Paired with ${event.peerName}")
+                    is LanHost.Event.Synced -> _snackbar.send("Synced with ${event.peerName}: ${event.stats.describe()}")
+                    is LanHost.Event.Failed -> _snackbar.send(event.message)
+                    is LanHost.Event.DiarySent -> notice = diarySent(event.peerName)
+                    is LanHost.Event.DiaryReceived -> Unit
                 }
             }
         }
-        if (!computer) {
+        if (canScan) {
             // A code that arrived some other way than the scanner (debug builds).
             viewModelScope.launch {
                 lan.pendingPairingLink.filterNotNull().collect { link ->
@@ -81,10 +82,7 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, com
                 val result = lan.pair(link) { progress = it.label() }
                 notice = when (result) {
                     is PairingResult.Paired -> Notice("Paired with ${result.peerName}", "Synced: ${result.stats.describe()}.")
-                    is PairingResult.DiarySent -> Notice(
-                        "Diary sent to ${result.peerName}",
-                        "To open it there, type this diary's password (or recovery key) on ${result.peerName}.",
-                    )
+                    is PairingResult.DiarySent -> diarySent(result.peerName)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -120,18 +118,24 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, com
     }
 
     fun showCode() {
-        viewModelScope.launch { host?.showInvite() }
+        viewModelScope.launch { host.showInvite() }
     }
 
     fun hideCode() {
-        host?.hideInvite()
+        host.hideInvite()
     }
 
-    private fun LanProgress.label() = when (this) {
-        LanProgress.Connecting -> "Connecting…"
-        LanProgress.SendingDiary -> "Sending the diary…"
-        LanProgress.Syncing -> "Syncing…"
-    }
+    private fun diarySent(peerName: String) = Notice(
+        "Diary sent to $peerName",
+        "To open it there, type this diary's password (or recovery key) on $peerName.",
+    )
+}
+
+internal fun LanProgress.label() = when (this) {
+    LanProgress.Connecting -> "Connecting…"
+    LanProgress.SendingDiary -> "Sending the diary…"
+    LanProgress.ReceivingDiary -> "Receiving the diary…"
+    LanProgress.Syncing -> "Syncing…"
 }
 
 internal fun SyncStats.describe(): String = when {

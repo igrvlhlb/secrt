@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.igrvlhlb.secrt.lan.LanHost
 import io.github.igrvlhlb.secrt.lan.LanSync
+import io.github.igrvlhlb.secrt.lan.PendingJoin
 import io.github.igrvlhlb.secrt.ui.auth.CredentialScreen
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -34,19 +35,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun JoinFromPhoneScreen(lan: LanSync, onCancel: () -> Unit) {
     val pending by lan.pendingJoin.collectAsStateWithLifecycle()
-    val join = pending
-    if (join != null) {
-        CredentialScreen(
-            title = "Open your diary",
-            passwordHint = "${join.peerName} sent its diary. Enter the diary's password to open it on this computer.",
-            recoveryHint = "${join.peerName} sent its diary. Enter the diary's recovery key to open it on this computer.",
-            submitLabel = "Open",
-            onSubmit = { lan.completeJoin(it) },
-            onCancel = {
-                lan.discardJoin()
-                onCancel()
-            },
-        )
+    pending?.let { join ->
+        OpenReceivedDiaryScreen(lan, join, onCancel)
         return
     }
 
@@ -72,7 +62,7 @@ fun JoinFromPhoneScreen(lan: LanSync, onCancel: () -> Unit) {
                 is LanHost.Status.Failed -> Text(s.message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                 is LanHost.Status.Listening -> PairingCodeCard(
                     invite = invite,
-                    instructions = "In secrt on your phone, open Settings → Devices → Pair with a computer, and scan this code. " +
+                    instructions = "In secrt on your phone, open Settings → Devices → Scan a code, and scan this one. " +
                         "The phone sends its diary, still encrypted; then you type the diary's password here. " +
                         "Both must be on the same Wi-Fi.",
                     onNewCode = { scope.launch { host.showInvite() } },
@@ -82,4 +72,23 @@ fun JoinFromPhoneScreen(lan: LanSync, onCancel: () -> Unit) {
             TextButton(onClick = onCancel) { Text("Back") }
         }
     }
+}
+
+/**
+ * The last step of setting up a device from another one, whichever way the diary came: it opens
+ * with the diary's own password (or recovery key), as a backup file would.
+ */
+@Composable
+internal fun OpenReceivedDiaryScreen(lan: LanSync, join: PendingJoin, onCancel: () -> Unit) {
+    CredentialScreen(
+        title = "Open your diary",
+        passwordHint = "${join.peerName} sent its diary. Enter the diary's password to open it here.",
+        recoveryHint = "${join.peerName} sent its diary. Enter the diary's recovery key to open it here.",
+        submitLabel = "Open",
+        onSubmit = { lan.completeJoin(it) },
+        onCancel = {
+            lan.discardJoin()
+            onCancel()
+        },
+    )
 }

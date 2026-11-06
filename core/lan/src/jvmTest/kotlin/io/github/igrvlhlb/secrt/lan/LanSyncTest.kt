@@ -39,8 +39,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Pairing and sync between two full app sessions (a "phone" and a "computer") over real localhost
- * sockets: the same code paths as between devices, minus the Wi-Fi.
+ * Pairing and sync between full app sessions (phones and a computer) over real localhost sockets:
+ * the same code paths as between devices, minus the Wi-Fi. "Computer" and "phone" are only names
+ * here: any device can listen or connect; the apps decide which one does what.
  */
 class LanSyncTest {
 
@@ -86,14 +87,16 @@ class LanSyncTest {
     }
 
     private val scope = CoroutineScope(Dispatchers.IO)
-    private val phone = Device("Phone")
-    private val computer = Device("Computer")
+    private val devices = mutableListOf<Device>()
+    private val phone = device("Phone")
+    private val computer = device("Computer")
+
+    private fun device(name: String) = Device(name).also { devices += it }
 
     @AfterTest
     fun tearDown() = runBlocking {
         scope.coroutineContext[kotlinx.coroutines.Job]?.cancelAndJoin()
-        phone.session.lock()
-        computer.session.lock()
+        devices.forEach { it.session.lock() }
     }
 
     private fun draft(title: String, body: String = "body", attachments: List<io.github.igrvlhlb.secrt.model.AttachmentRef> = emptyList()) =
@@ -203,6 +206,131 @@ class LanSyncTest {
     }
 
     @Test
+    fun setsUpANewDeviceThatScansTheCodeOfOneWithTheDiary() = test {
+        // The lost-phone case: the computer still has the diary and shows a code; the new phone scans it.
+        computer.session.create("diary-password", withRecoveryKey = false)
+        val photo = computer.store.addAttachment("pixels".encodeToByteArray(), "photo.png", "image/png")
+        computer.store.saveEntry("e1", draft("Day one", attachments = listOf(photo)))
+        computer.store.saveEntry("e2", draft("Day two"))
+        val host = computer.listen()
+        val newPhone = device("New phone")
+
+        val sent = scope.launch { host.events.first { it is LanHost.Event.DiarySent } }
+        val steps = mutableListOf<LanProgress>()
+        val join = newPhone.lan.join(host.newCode()) { steps += it }
+        sent.join()
+        assertEquals(listOf(LanProgress.Connecting, LanProgress.ReceivingDiary), steps)
+        assertEquals("Computer", join.peerName)
+        assertEquals(join, newPhone.lan.pendingJoin.value)
+        // Nothing opens without the password; the code is used up.
+        assertEquals(SessionState.NoVault, newPhone.session.state.value)
+        assertNull(host.invite.value)
+        assertFailsWith<InvalidCredentialsException> { newPhone.lan.completeJoin(Credential.Password("wrong")) }
+
+        newPhone.lan.completeJoin(Credential.Password("diary-password"))
+        assertNull(newPhone.lan.pendingJoin.value)
+        assertEquals(computer.session.vaultId, newPhone.session.vaultId)
+        assertEquals(setOf("Day one", "Day two"), newPhone.store.titles())
+        assertContentEquals("pixels".encodeToByteArray(), newPhone.store.readAttachment(photo.blobId))
+        assertTrue(newPhone.store.deviceId != computer.store.deviceId)
+        // Each keeps the other; the new phone also knows where to find the computer again.
+        val computerOnPhone = newPhone.store.peers.all().single()
+        assertEquals("Computer", computerOnPhone.name)
+        assertEquals(computer.store.deviceId, computerOnPhone.deviceId)
+        assertTrue(computerOnPhone.addresses.first().startsWith("127.0.0.1:"))
+        assertEquals("New phone", computer.store.peers.all().single().name)
+
+        // Later syncs authenticate with the identity it paired with, both ways.
+        newPhone.store.saveEntry("e3", draft("Written on the new phone"))
+        computer.store.saveEntry("e4", draft("Written on the computer"))
+        val stats = newPhone.lan.sync(computerOnPhone)
+        assertEquals(SyncStats(received = 1, sent = 1), stats)
+        assertEquals(newPhone.store.titles(), computer.store.titles())
+        assertEquals(newPhone.store.deviceId, computer.store.peers.all().single().deviceId)
+    }
+
+    @Test
+    fun twoPhonesPairAndSyncWhicheverShowsTheCode() = test {
+        // A phone sets up another one, then each shows a code the other scans: both can start syncs.
+        phone.session.create("pw", withRecoveryKey = false)
+        phone.store.saveEntry("e1", draft("From the old phone"))
+        val oldPhone = phone
+        val newPhone = device("New phone")
+        val oldHost = oldPhone.listen()
+        newPhone.lan.join(oldHost.newCode())
+        newPhone.lan.completeJoin(Credential.Password("pw"))
+        assertEquals(setOf("From the old phone"), newPhone.store.titles())
+
+        // The old phone also scans the new one's code, while still listening itself.
+        val newHost = newPhone.listen()
+        assertIs<PairingResult.Paired>(oldPhone.lan.pair(newHost.newCode()))
+        assertEquals("New phone", oldPhone.store.peers.all().single().name)
+        assertEquals("Phone", newPhone.store.peers.all().single().name)
+
+        oldPhone.store.saveEntry("e2", draft("Old phone, later"))
+        assertEquals(SyncStats(received = 0, sent = 1), oldPhone.lan.sync(oldPhone.store.peers.all().single()))
+        oldPhone.store.saveEntry("e3", draft("Old phone, even later"))
+        newPhone.store.saveEntry("e4", draft("New phone, later"))
+        assertEquals(SyncStats(received = 1, sent = 1), newPhone.lan.sync(newPhone.store.peers.all().single()))
+        assertEquals(setOf("From the old phone", "Old phone, later", "Old phone, even later", "New phone, later"), oldPhone.store.titles())
+        assertEquals(oldPhone.store.titles(), newPhone.store.titles())
+        assertEquals(oldPhone.store.versionVector(), newPhone.store.versionVector())
+    }
+
+    @Test
+    fun aNewDeviceNeedsTheRightCodeInTime() = test {
+        computer.session.create("pw", withRecoveryKey = false)
+        computer.store.saveEntry("e1", draft("Day one"))
+        val host = computer.listen()
+        val newPhone = device("New phone")
+        val invite = PairingInvite.parse(host.newCode())
+
+        val wrongSecret = PairingInvite(invite.addresses, invite.port, invite.identityKey, ByteArray(32) { 7 })
+        assertFailsWith<LanException.WrongCode> { newPhone.lan.join(wrongSecret.toLink()) }
+        assertFailsWith<LanException.InvalidCode> { newPhone.lan.join("https://example.com") }
+        computer.clock += LanHost.INVITE_VALIDITY_MILLIS + 1
+        assertFailsWith<LanException.WrongCode> { newPhone.lan.join(invite.toLink()) }
+        assertNull(newPhone.lan.pendingJoin.value)
+        assertEquals(SessionState.NoVault, newPhone.session.state.value)
+        assertEquals(emptyList(), computer.store.peers.all())
+
+        // Nobody showing a code: refused before anything is said.
+        host.hideInvite()
+        assertFailsWith<LanException.Refused> { newPhone.lan.join(invite.toLink()) }
+
+        val fresh = host.newCode()
+        newPhone.lan.join(fresh)
+        // Used once: a second device can't take the diary with the same code.
+        assertFailsWith<LanException.Refused> { device("Someone else").lan.join(fresh) }
+        assertEquals("New phone", computer.store.peers.all().single().name)
+    }
+
+    @Test
+    fun refusesToSetUpFromADeviceWithoutADiary() = test {
+        // Two devices being set up: neither has anything to give.
+        val host = computer.listen(joining = true)
+        val newPhone = device("New phone")
+        assertFailsWith<LanException.NoDiary> { newPhone.lan.join(host.newCode()) }
+        assertNull(newPhone.lan.pendingJoin.value)
+        assertNull(computer.lan.pendingJoin.value)
+        assertEquals(SessionState.NoVault, computer.session.state.value)
+    }
+
+    @Test
+    fun aLockedDiaryIsNeitherSentNorSynced() = test {
+        sameDiaryOnBoth()
+        val host = computer.listen()
+        val code = host.newCode()
+        computer.session.lock()
+
+        val newPhone = device("New phone")
+        assertFailsWith<LanException.Refused> { newPhone.lan.join(code) }
+        assertNull(newPhone.lan.pendingJoin.value)
+        assertFailsWith<LanException.Refused> { phone.lan.pair(code) }
+        assertEquals(emptyList(), phone.store.peers.all())
+    }
+
+    @Test
     fun refusesToPairDifferentDiaries() = test {
         phone.session.create("pw", withRecoveryKey = false)
         phone.store.saveEntry("e1", draft("Phone diary"))
@@ -265,10 +393,9 @@ class LanSyncTest {
         assertTrue("Not for unpaired devices" !in phone.store.titles())
 
         // Nor can a device that never paired, even holding the same diary.
-        val stranger = Device("Stranger")
+        val stranger = device("Stranger")
         stranger.session.restore(Buffer().also { phone.session.exportTo(it) }, Credential.Password("pw"))
         assertFailsWith<LanException.UnknownDevice> { stranger.lan.sync(peer) }
-        stranger.session.lock()
     }
 
     @Test

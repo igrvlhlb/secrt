@@ -10,6 +10,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,7 +37,8 @@ import io.github.igrvlhlb.secrt.ui.backup.CloudRestoreButton
 import io.github.igrvlhlb.secrt.ui.devices.DevicesScreen
 import io.github.igrvlhlb.secrt.ui.devices.JoinFromPhoneScreen
 import io.github.igrvlhlb.secrt.ui.devices.LocalOpenDevices
-import io.github.igrvlhlb.secrt.ui.devices.isComputer
+import io.github.igrvlhlb.secrt.ui.devices.SetUpFromDeviceScreen
+import io.github.igrvlhlb.secrt.ui.devices.canScanCodes
 import io.github.igrvlhlb.secrt.ui.editor.EditorScreen
 import io.github.igrvlhlb.secrt.ui.editor.EditorViewModel
 import io.github.igrvlhlb.secrt.ui.home.HomeScreen
@@ -71,53 +73,71 @@ fun SecrtApp(
             var creating by remember { mutableStateOf(false) }
             var pendingRecoveryKey by remember { mutableStateOf<String?>(null) }
             var backupToRestore by remember { mutableStateOf<PickedDocument?>(null) }
-            var joiningFromPhone by remember { mutableStateOf(false) }
+            // Saveable: on a phone, rotating mid-transfer must not drop back to the first screen.
+            var joiningFromDevice by rememberSaveable { mutableStateOf(false) }
             val pickBackup = rememberOpenDocument { backupToRestore = it }
 
             AutoLockEffect(autoLock)
             // Everything opened while unlocked (ViewModels holding diary content) goes away on lock.
-            LaunchedEffect(state) { if (state !is SessionState.Unlocked) unlockedScope.clear() else joiningFromPhone = false }
+            LaunchedEffect(state) { if (state !is SessionState.Unlocked) unlockedScope.clear() else joiningFromDevice = false }
+            if (lan != null && state == SessionState.NoVault) {
+                // A received diary still waiting for its password, or a pairing code handed in from outside (debug builds).
+                val pendingJoin by lan.pendingJoin.collectAsStateWithLifecycle()
+                val pendingLink by lan.pendingPairingLink.collectAsStateWithLifecycle()
+                LaunchedEffect(pendingJoin != null, pendingLink != null) {
+                    if (pendingJoin != null || (pendingLink != null && canScanCodes)) joiningFromDevice = true
+                }
+            }
 
-            when (val s = state) {
-                SessionState.NoVault -> when (val backup = backupToRestore) {
-                    null if joiningFromPhone && lan != null -> JoinFromPhoneScreen(lan, onCancel = { joiningFromPhone = false })
-                    null -> SetupScreen(
-                        onCreate = { password, withRecoveryKey ->
-                            creating = true
-                            try {
-                                pendingRecoveryKey = session.create(password, withRecoveryKey)
-                            } finally {
-                                creating = false
+            // Provided before the diary exists too: the camera permission dialog pauses it.
+            CompositionLocalProvider(LocalAutoLock provides autoLock) {
+                when (val s = state) {
+                    SessionState.NoVault -> when (val backup = backupToRestore) {
+                        // A computer can't scan: it shows a code, and the phone sends the diary.
+                        null if joiningFromDevice && lan != null -> if (canScanCodes) {
+                            SetUpFromDeviceScreen(lan, onCancel = { joiningFromDevice = false })
+                        } else {
+                            JoinFromPhoneScreen(lan, onCancel = { joiningFromDevice = false })
+                        }
+                        null -> SetupScreen(
+                            onCreate = { password, withRecoveryKey ->
+                                creating = true
+                                try {
+                                    pendingRecoveryKey = session.create(password, withRecoveryKey)
+                                } finally {
+                                    creating = false
+                                }
+                            },
+                            onRestore = pickBackup,
+                            moreRestoreOptions = { CloudRestoreButton(session) },
+                            onSetUpFromDevice = if (lan != null) ({ joiningFromDevice = true }) else null,
+                            setUpFromDeviceLabel = if (canScanCodes) "Set up from another device" else "Set up from your phone",
+                        )
+                        else -> RestoreScreen(
+                            fileName = backup.name,
+                            onRestore = { credential ->
+                                session.restore(backup.openSource(), credential)
+                                backupToRestore = null
+                            },
+                            onCancel = { backupToRestore = null },
+                        )
+                    }
+                    SessionState.Locked -> UnlockScreen(
+                        onUnlock = { credential ->
+                            when (credential) {
+                                is Credential.Password -> session.unlock(credential.password)
+                                is Credential.RecoveryKey -> session.unlockWithRecoveryKey(credential.recoveryKey)
                             }
                         },
-                        onRestore = pickBackup,
-                        moreRestoreOptions = { CloudRestoreButton(session) },
-                        onSetUpFromPhone = if (lan != null && isComputer) ({ joiningFromPhone = true }) else null,
+                        onBiometricUnlock = if (biometricUnlock) session::unlockWithBiometrics else null,
                     )
-                    else -> RestoreScreen(
-                        fileName = backup.name,
-                        onRestore = { credential ->
-                            session.restore(backup.openSource(), credential)
-                            backupToRestore = null
-                        },
-                        onCancel = { backupToRestore = null },
-                    )
-                }
-                SessionState.Locked -> UnlockScreen(
-                    onUnlock = { credential ->
-                        when (credential) {
-                            is Credential.Password -> session.unlock(credential.password)
-                            is Credential.RecoveryKey -> session.unlockWithRecoveryKey(credential.recoveryKey)
+                    is SessionState.Unlocked -> when {
+                        creating -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                        pendingRecoveryKey != null -> RecoveryKeyScreen(pendingRecoveryKey!!) { pendingRecoveryKey = null }
+                        s.viaRecoveryKey -> NewPasswordScreen { session.changePassword(currentPassword = null, newPassword = it) }
+                        else -> CompositionLocalProvider(LocalViewModelStoreOwner provides unlockedScope) {
+                            DiaryNavigation(s.store, session, autoLock, backgroundScope, lan)
                         }
-                    },
-                    onBiometricUnlock = if (biometricUnlock) session::unlockWithBiometrics else null,
-                )
-                is SessionState.Unlocked -> when {
-                    creating -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                    pendingRecoveryKey != null -> RecoveryKeyScreen(pendingRecoveryKey!!) { pendingRecoveryKey = null }
-                    s.viaRecoveryKey -> NewPasswordScreen { session.changePassword(currentPassword = null, newPassword = it) }
-                    else -> CompositionLocalProvider(LocalViewModelStoreOwner provides unlockedScope, LocalAutoLock provides autoLock) {
-                        DiaryNavigation(s.store, session, autoLock, backgroundScope, lan)
                     }
                 }
             }

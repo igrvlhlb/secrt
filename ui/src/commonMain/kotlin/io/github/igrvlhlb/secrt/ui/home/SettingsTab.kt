@@ -202,7 +202,7 @@ fun SettingsTab(session: AppSession) {
                 CloudBackupRow(session)
             }
             LocalOpenDevices.current?.let { openDevices ->
-                ElevatedCard { SettingRow(Icons.Outlined.Devices, "Devices", "Pair with your computer and sync over Wi-Fi") { openDevices() } }
+                ElevatedCard { SettingRow(Icons.Outlined.Devices, "Devices", "Pair with your other devices and sync over Wi-Fi") { openDevices() } }
             }
             ElevatedCard {
                 SettingRow(Icons.Outlined.Timer, "Auto-lock", settings.autoLock.description) { choosingAutoLock = true }

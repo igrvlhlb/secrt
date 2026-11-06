@@ -45,7 +45,7 @@ import io.github.igrvlhlb.secrt.ui.LocalAutoLock
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal actual val isComputer: Boolean = false
+internal actual val canScanCodes: Boolean = true
 
 internal actual fun qrModules(text: String): Array<BooleanArray> {
     val hints = mapOf(EncodeHintType.MARGIN to 0, EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M)
@@ -81,7 +81,7 @@ internal actual fun QrScanner(onScanned: (String) -> Unit, modifier: Modifier) {
         CameraPreview(onScanned, modifier)
     } else if (asked) {
         Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("secrt needs the camera to scan the pairing code on your computer. It's only used while this screen is open.")
+            Text("secrt needs the camera to scan the pairing code on your other device. It's only used while this screen is open.")
             Button(onClick = ::requestPermission) { Text("Allow camera") }
         }
     }

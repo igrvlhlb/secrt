@@ -12,8 +12,9 @@ import io.github.igrvlhlb.secrt.lan.LanSync
  * adb shell am start -n io.github.igrvlhlb.secrt/.android.MainActivity --es io.github.igrvlhlb.secrt.debug.PAIRING_LINK 'secrt-pair:…'
  * ```
  *
- * The code goes exactly where a scanned one would (the Devices screen, once the diary is unlocked),
- * so the user still sees what happens. Release builds compile the no-op in `src/release`.
+ * The code goes exactly where a scanned one would: the Devices screen once the diary is unlocked,
+ * or "Set up from another device" on a phone without a diary yet, so the user still sees what
+ * happens. Release builds compile the no-op in `src/release`.
  */
 internal object DebugHooks {
     private const val EXTRA_PAIRING_LINK = "io.github.igrvlhlb.secrt.debug.PAIRING_LINK"
