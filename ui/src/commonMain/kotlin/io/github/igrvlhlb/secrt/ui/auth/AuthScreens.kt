@@ -19,10 +19,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
@@ -138,13 +138,18 @@ private fun NewPasswordForm(buttonText: String, busy: Boolean, extra: @Composabl
     BusyButton(buttonText, busy, valid) { onSubmit(password) }
 }
 
-/** @param moreRestoreOptions other ways to bring an existing diary, shown under the backup file one. */
+/**
+ * @param moreRestoreOptions other ways to bring an existing diary, shown under the backup file one.
+ * @param onSetUpFromDevice receiving the diary from another of the user's devices, labelled
+ *   [setUpFromDeviceLabel].
+ */
 @Composable
 fun SetupScreen(
     onCreate: suspend (password: String, withRecoveryKey: Boolean) -> Unit,
     onRestore: () -> Unit,
     moreRestoreOptions: @Composable () -> Unit = {},
-    onSetUpFromPhone: (() -> Unit)? = null,
+    onSetUpFromDevice: (() -> Unit)? = null,
+    setUpFromDeviceLabel: String = "Set up from another device",
 ) {
     val scope = rememberCoroutineScope()
     var withRecoveryKey by remember { mutableStateOf(true) }
@@ -195,11 +200,11 @@ fun SetupScreen(
             Text("Restore from a backup file")
         }
         moreRestoreOptions()
-        if (onSetUpFromPhone != null) {
-            OutlinedButton(onClick = onSetUpFromPhone, enabled = !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                Icon(Icons.Outlined.PhoneAndroid, contentDescription = null)
+        if (onSetUpFromDevice != null) {
+            OutlinedButton(onClick = onSetUpFromDevice, enabled = !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                Icon(Icons.Outlined.Devices, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Set up from your phone")
+                Text(setUpFromDeviceLabel)
             }
         }
     }

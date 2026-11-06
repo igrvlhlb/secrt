@@ -3,6 +3,7 @@ package io.github.igrvlhlb.secrt.ui.devices
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,9 +16,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.outlined.Computer
 import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.QrCode2
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.Sync
@@ -32,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -62,12 +63,13 @@ import kotlin.time.Clock
 import kotlin.time.Instant
 
 /**
- * Paired devices and how to pair more. On a computer, the screen being open is what makes it
- * listen for the user's phone; on a phone, it's where pairing codes are scanned and syncs started.
+ * Paired devices and how to pair more. The screen being open is what makes this device listen for
+ * the user's other devices (and show pairing codes); where it has a camera, it's also where other
+ * devices' codes are scanned and syncs started.
  */
 @Composable
 fun DevicesScreen(lan: LanSync, store: DiaryStore, onBack: () -> Unit) {
-    val vm = viewModel { DevicesViewModel(lan, store, isComputer) }
+    val vm = viewModel { DevicesViewModel(lan, store, canScanCodes) }
     val peers by vm.peers.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var scanning by remember { mutableStateOf(false) }
@@ -75,7 +77,11 @@ fun DevicesScreen(lan: LanSync, store: DiaryStore, onBack: () -> Unit) {
     LaunchedEffect(vm) { vm.snackbar.collect { snackbar.showSnackbar(it) } }
 
     if (scanning) {
-        ScanScreen(onScanned = { scanning = false; vm.pair(it) }, onBack = { scanning = false })
+        ScanScreen(
+            instructions = "Point the camera at the code on your other device (in secrt there: Settings → Devices → Show a code).",
+            onScanned = { scanning = false; vm.pair(it) },
+            onBack = { scanning = false },
+        )
         return
     }
 
@@ -92,13 +98,16 @@ fun DevicesScreen(lan: LanSync, store: DiaryStore, onBack: () -> Unit) {
             Modifier.padding(padding).fillMaxSize().readableWidth().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            val host = vm.host
-            if (host != null) ComputerSection(host, onShowCode = vm::showCode, onHideCode = vm::hideCode) else PhoneSection(onPair = { scanning = true })
+            SyncSection(vm.host, canScan = canScanCodes, onShowCode = vm::showCode, onHideCode = vm::hideCode, onScan = { scanning = true })
 
             Text("Paired devices", style = MaterialTheme.typography.titleMedium)
             if (peers.isEmpty()) {
                 Text(
-                    if (host != null) "None yet. Pair your phone with the code above." else "None yet. Pair with secrt on your computer to sync this diary with it.",
+                    if (canScanCodes) {
+                        "None yet. Pair with secrt on your other devices to keep this diary in sync with them."
+                    } else {
+                        "None yet. Pair your phone with a code from above."
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
@@ -107,7 +116,8 @@ fun DevicesScreen(lan: LanSync, store: DiaryStore, onBack: () -> Unit) {
                         if (i > 0) HorizontalDivider()
                         PeerRow(
                             peer = peer,
-                            canSync = host == null,
+                            // Only the side that scanned knows where to find the other one.
+                            canSync = peer.addresses.isNotEmpty(),
                             syncing = vm.syncing == peer.identityKey,
                             onSync = { vm.sync(peer) },
                             onForget = { forgetting = peer },
@@ -150,11 +160,16 @@ fun DevicesScreen(lan: LanSync, store: DiaryStore, onBack: () -> Unit) {
     }
 }
 
+/**
+ * How this device pairs and syncs: it listens while the screen is open and shows codes for others
+ * to scan; with [canScan], it also scans theirs.
+ */
 @Composable
-private fun ComputerSection(host: LanHost, onShowCode: () -> Unit, onHideCode: () -> Unit) {
+private fun SyncSection(host: LanHost, canScan: Boolean, onShowCode: () -> Unit, onHideCode: () -> Unit, onScan: () -> Unit) {
     val status by host.status.collectAsStateWithLifecycle()
     val invite by host.invite.collectAsStateWithLifecycle()
     var codeShown by remember { mutableStateOf(false) }
+    val listening = status is LanHost.Status.Listening
     ElevatedCard {
         ListItem(
             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -172,6 +187,11 @@ private fun ComputerSection(host: LanHost, onShowCode: () -> Unit, onHideCode: (
                 Text(
                     when (val s = status) {
                         LanHost.Status.Starting -> ""
+                        is LanHost.Status.Listening if canScan ->
+                            "Your diary syncs directly with secrt on your other devices, encrypted, without any server. " +
+                                "To pair, scan the code another device shows, or show this one's code to a phone. While " +
+                                "this screen is open, paired devices can also sync with this one. Both must be on the " +
+                                "same Wi-Fi. This device: ${s.addresses.joinToString()}, port ${s.port}."
                         is LanHost.Status.Listening ->
                             "While this screen is open, your paired phone can sync with this computer: tap Sync now in " +
                                 "secrt on the phone (Settings → Devices). Both must be on the same Wi-Fi. " +
@@ -181,51 +201,38 @@ private fun ComputerSection(host: LanHost, onShowCode: () -> Unit, onHideCode: (
                 )
             },
         )
-        if (status is LanHost.Status.Listening) {
+        if (codeShown && listening) {
             HorizontalDivider()
-            if (codeShown) {
-                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                    PairingCodeCard(
-                        invite = invite,
-                        instructions = "In secrt on your phone, open Settings → Devices → Pair with a computer, and scan this code.",
-                        onNewCode = onShowCode,
-                        onCancel = { codeShown = false; onHideCode() },
-                    )
-                }
-            } else {
-                Box(Modifier.fillMaxWidth().padding(16.dp)) {
-                    Button(onClick = { codeShown = true; onShowCode() }) {
-                        Icon(Icons.Outlined.QrCode2, contentDescription = null)
+            Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                PairingCodeCard(
+                    invite = invite,
+                    instructions = "In secrt on your phone, open Settings → Devices → Scan a code, and scan this one. A new " +
+                        "phone can scan it from \"Set up from another device\" on its first screen to receive this diary, " +
+                        "still encrypted.",
+                    onNewCode = onShowCode,
+                    onCancel = { codeShown = false; onHideCode() },
+                )
+            }
+        } else if (listening || canScan) {
+            HorizontalDivider()
+            FlowRow(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (canScan) {
+                    Button(onClick = onScan) {
+                        Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Pair a phone")
+                        Text("Scan a code")
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PhoneSection(onPair: () -> Unit) {
-    ElevatedCard {
-        ListItem(
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-            leadingContent = { Icon(Icons.Outlined.Wifi, contentDescription = null) },
-            headlineContent = { Text("Sync over Wi-Fi") },
-            supportingContent = {
-                Text(
-                    "Your diary syncs directly with secrt on your computer, encrypted, without any server. " +
-                        "To pair, open Settings → Devices on the computer (or \"Set up from your phone\" on a new one) " +
-                        "and scan the code it shows.",
-                )
-            },
-        )
-        HorizontalDivider()
-        Box(Modifier.fillMaxWidth().padding(16.dp)) {
-            Button(onClick = onPair) {
-                Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Pair with a computer")
+                if (listening) {
+                    val showCode = { codeShown = true; onShowCode() }
+                    val content: @Composable () -> Unit = {
+                        Icon(Icons.Outlined.QrCode2, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Show a code")
+                    }
+                    // Scanning is the usual way on a phone; on a computer, showing is the only one.
+                    if (canScan) OutlinedButton(onClick = showCode) { content() } else Button(onClick = showCode) { content() }
+                }
             }
         }
     }
@@ -235,9 +242,12 @@ private fun PhoneSection(onPair: () -> Unit) {
 private fun PeerRow(peer: Peer, canSync: Boolean, syncing: Boolean, onSync: () -> Unit, onForget: () -> Unit) {
     ListItem(
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        leadingContent = { Icon(if (canSync) Icons.Outlined.Computer else Icons.Outlined.PhoneAndroid, contentDescription = null) },
+        leadingContent = { Icon(Icons.Outlined.Devices, contentDescription = null) },
         headlineContent = { Text(peer.name) },
-        supportingContent = { Text(peer.lastSyncAt?.let { "Last synced ${formatTime(it)}" } ?: "Not synced yet") },
+        supportingContent = {
+            val lastSync = peer.lastSyncAt?.let { "Last synced ${formatTime(it)}" } ?: "Not synced yet"
+            Text(if (canSync) lastSync else "$lastSync. Syncs start on ${peer.name}.")
+        },
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (canSync) {
@@ -258,7 +268,7 @@ private fun PeerRow(peer: Peer, canSync: Boolean, syncing: Boolean, onSync: () -
 }
 
 @Composable
-private fun ScanScreen(onScanned: (String) -> Unit, onBack: () -> Unit) {
+internal fun ScanScreen(instructions: String, onScanned: (String) -> Unit, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -268,10 +278,7 @@ private fun ScanScreen(onScanned: (String) -> Unit, onBack: () -> Unit) {
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            Text(
-                "Point the camera at the code on your computer's screen (Settings → Devices → Pair a phone).",
-                modifier = Modifier.padding(16.dp),
-            )
+            Text(instructions, modifier = Modifier.padding(16.dp))
             QrScanner(onScanned, Modifier.fillMaxWidth().weight(1f))
             Spacer(Modifier.height(16.dp))
         }

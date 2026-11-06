@@ -33,7 +33,11 @@ class SecrtApplication : Application() {
         )
     }
 
-    /** Pairing and sync with the user's computer. Only connects out: a phone never listens. */
+    /**
+     * Pairing and sync with the user's other devices. The phone listens only while its Devices
+     * screen is open; nothing extra is needed for that while targetSdk is below 37 (see
+     * docs/architecture.md, "LAN pairing & sync").
+     */
     val lan: LanSync by lazy {
         LanSync(
             session = session,

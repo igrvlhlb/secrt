@@ -7,7 +7,7 @@ import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 
-internal actual val isComputer: Boolean = true
+internal actual val canScanCodes: Boolean = false
 
 internal actual fun qrModules(text: String): Array<BooleanArray> {
     val hints = mapOf(EncodeHintType.MARGIN to 0, EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M)
