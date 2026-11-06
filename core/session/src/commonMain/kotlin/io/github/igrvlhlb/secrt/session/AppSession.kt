@@ -4,6 +4,7 @@ import io.github.igrvlhlb.secrt.archive.DifferentVaultException
 import io.github.igrvlhlb.secrt.archive.SecrtArchive
 import io.github.igrvlhlb.secrt.crypto.Argon2Params
 import io.github.igrvlhlb.secrt.crypto.Crypto
+import io.github.igrvlhlb.secrt.model.Revision
 import io.github.igrvlhlb.secrt.storage.BlobStore
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.storage.DriverFactory
@@ -202,44 +203,70 @@ class AppSession(
      * @throws InvalidCredentialsException
      * @throws io.github.igrvlhlb.secrt.archive.ArchiveException if the file isn't a usable backup.
      */
-    suspend fun restore(source: Source, credential: Credential) = io {
+    suspend fun restore(source: Source, credential: Credential) = restoreFrom(credential, load = { restore ->
+        source.buffer().use { input ->
+            SecrtArchive.read(
+                input,
+                restore.crypto,
+                unlock = { _, json -> restore.unlock(json) },
+                storeBlob = { id, data -> restore.blobs.putEncrypted(id, data) },
+            )
+        }
+    })
+
+    /**
+     * First run only: recreates the diary from a copy kept elsewhere (a backup file, a cloud
+     * backup), with the same guarantee as [restore]: nothing is left behind if anything fails.
+     *
+     * @param load reads the copy: it must call [RestoreContext.unlock] with the copy's `vault.key`
+     *   before storing attachments in [RestoreContext.blobs], and returns the revisions to apply.
+     * @param finish runs on the restored diary before it is committed (e.g. to remember where it
+     *   came from); failing there still undoes everything.
+     */
+    suspend fun restoreFrom(
+        credential: Credential,
+        load: suspend (RestoreContext) -> List<Revision>,
+        finish: suspend (OpenDiary) -> Unit = {},
+    ) = io {
         check(_state.value == SessionState.NoVault) { "A diary already exists" }
         wipeLocalData()
         val vault = vault()
         val crypto = cryptoProvider()
-        var restoredKeys: VaultKeys? = null
-        var headerJson: String? = null
-        var blobStore: BlobStore? = null
+        val restore = RestoreContext(
+            crypto,
+            unlockHeader = { json -> vault.unlockExternal(json, credential) },
+            blobStore = { BlobStore(fileSystem, vaultDirectory / "blobs", crypto, it) },
+        )
         var store: DiaryStore? = null
         try {
-            val revisions = source.buffer().use { input ->
-                SecrtArchive.read(
-                    input,
-                    crypto,
-                    unlock = { _, json ->
-                        vault.unlockExternal(json, credential).also {
-                            restoredKeys = it
-                            headerJson = json
-                            blobStore = BlobStore(fileSystem, vaultDirectory / "blobs", crypto, it)
-                        }
-                    },
-                    storeBlob = { id, data -> requireNotNull(blobStore).putEncrypted(id, data) },
-                )
-            }
-            val newKeys = requireNotNull(restoredKeys)
-            store = DiaryStore.open(driverFactory.create(SecrtDatabase.Schema, newKeys.databaseKey), requireNotNull(blobStore), ioDispatcher)
+            val revisions = load(restore)
+            val newKeys = checkNotNull(restore.keys) { "The restore source never unlocked a vault key" }
+            val blobStore = restore.blobs
+            store = DiaryStore.open(driverFactory.create(SecrtDatabase.Schema, newKeys.databaseKey), blobStore, ioDispatcher)
             store.applyRemote(revisions)
+            val headerJson = requireNotNull(restore.vaultKeyJson)
+            finish(OpenDiary(store, newKeys, blobStore, crypto, headerJson))
             // Installed last: until vault.key exists the app still considers itself "first run".
-            vault.install(requireNotNull(headerJson))
+            vault.install(headerJson)
             keys = newKeys
             blobs = blobStore
             _state.value = SessionState.Unlocked(store, viaRecoveryKey = credential is Credential.RecoveryKey)
         } catch (e: Exception) {
             store?.close()
-            restoredKeys?.close()
+            restore.keys?.close()
             wipeLocalData()
             throw e
         }
+    }
+
+    /**
+     * Runs [block] with the open diary's keys, holding the session lock so the diary can't lock
+     * (wiping the keys) halfway through. For transports such as cloud backup; anything that leaves
+     * the device must still be read through [DiaryStore.revisionsSince].
+     */
+    suspend fun <T> withOpenDiary(block: suspend (OpenDiary) -> T): T = io {
+        val store = unlockedStore()
+        block(OpenDiary(store, requireNotNull(keys), requireNotNull(blobs), cryptoProvider(), vault().headerJson()))
     }
 
     /**

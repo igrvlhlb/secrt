@@ -215,6 +215,27 @@ class DiaryStore private constructor(
         }
     }
 
+    // ---------------------------------------------------------------- per-replica settings
+
+    /**
+     * A value other modules keep with this replica (e.g. backup bookkeeping and credentials): it is
+     * encrypted with the diary and never synced. Use a prefix per module; the store's own keys
+     * (device id, sharing watermark) are off limits.
+     */
+    suspend fun getLocalSetting(key: String): String? = read {
+        db.metaQueries.get(checkedSettingKey(key)).executeAsOneOrNull()?.takeIf { it.isNotEmpty() }
+    }
+
+    /** Sets or, with `null`, clears (overwrites with an empty value) a [getLocalSetting] value. */
+    suspend fun putLocalSetting(key: String, value: String?) = write {
+        db.metaQueries.put(checkedSettingKey(key), value.orEmpty())
+    }
+
+    private fun checkedSettingKey(key: String): String {
+        require(key.isNotEmpty() && key != META_DEVICE_ID && key != META_SHARED_SEQ) { "Reserved setting key: $key" }
+        return key
+    }
+
     suspend fun close() = writeLock.withLock {
         if (!closed) {
             closed = true

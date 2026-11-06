@@ -33,8 +33,9 @@ class DifferentVaultException : ArchiveException("This backup belongs to a diffe
  * blobs/<blobId>         attachments                          encrypted, copied as stored
  * ```
  *
- * The same layout will be used for cloud backups. Restoring or importing means applying the
- * revisions through the merge engine, exactly like sync.
+ * Cloud backups (`core:backup`) reuse the segment encryption ([sealSegment], [openSegment]) and
+ * the attachment files as stored. Restoring or importing means applying the revisions through the
+ * merge engine, exactly like sync.
  */
 object SecrtArchive {
     const val EXTENSION = "secrt"
@@ -72,8 +73,7 @@ object SecrtArchive {
         zip.put(VAULT_KEY, vaultKeyJson.encodeToByteArray())
         revisions.groupBy { it.deviceId }.entries.sortedBy { it.key }.forEach { (deviceId, deviceRevisions) ->
             val name = "$LOG_PREFIX$deviceId$LOG_SUFFIX"
-            val json = SecrtJson.encodeToString(Segment(deviceRevisions.sortedBy { it.seq }))
-            zip.put(name, crypto.seal(keys.archiveKey, json.encodeToByteArray(), aad(keys.vaultId, name)))
+            zip.put(name, sealSegment(crypto, keys, name, deviceRevisions))
         }
         referencedBlobs(revisions).forEach { blobId -> zip.put("$BLOB_PREFIX$blobId", readBlob(blobId)) }
         zip.finish()
@@ -114,14 +114,7 @@ object SecrtArchive {
         while (true) {
             val (name, data) = zip.next() ?: break
             when {
-                name.startsWith(LOG_PREFIX) && name.endsWith(LOG_SUFFIX) -> {
-                    val json = try {
-                        crypto.open(keys.archiveKey, data, aad(keys.vaultId, name))
-                    } catch (e: DecryptionException) {
-                        throw CorruptArchiveException("$name can't be decrypted", e)
-                    }
-                    revisions += SecrtJson.decodeFromString<Segment>(json.decodeToString()).revisions
-                }
+                name.startsWith(LOG_PREFIX) && name.endsWith(LOG_SUFFIX) -> revisions += openSegment(crypto, keys, name, data)
                 name.startsWith(BLOB_PREFIX) -> try {
                     storeBlob(name.removePrefix(BLOB_PREFIX), data)
                 } catch (e: DecryptionException) {
@@ -133,13 +126,40 @@ object SecrtArchive {
         return revisions
     }
 
+    /**
+     * Encrypts a batch of revisions with the archive key. The AAD binds the ciphertext to the vault
+     * and to [name], its path inside the archive or backup folder, so a segment can't be passed off
+     * as another one or moved into another diary.
+     */
+    fun sealSegment(crypto: Crypto, keys: VaultKeys, name: String, revisions: List<Revision>): ByteArray {
+        val json = SecrtJson.encodeToString(Segment(revisions.sortedWith(compareBy({ it.deviceId }, { it.seq }))))
+        return crypto.seal(keys.archiveKey, json.encodeToByteArray(), aad(keys.vaultId, name))
+    }
+
+    /**
+     * Reverses [sealSegment].
+     * @throws CorruptArchiveException if [data] was tampered with, renamed, or isn't a segment.
+     */
+    fun openSegment(crypto: Crypto, keys: VaultKeys, name: String, data: ByteArray): List<Revision> {
+        val json = try {
+            crypto.open(keys.archiveKey, data, aad(keys.vaultId, name))
+        } catch (e: DecryptionException) {
+            throw CorruptArchiveException("$name can't be decrypted", e)
+        }
+        return try {
+            SecrtJson.decodeFromString<Segment>(json.decodeToString()).revisions
+        } catch (e: IllegalArgumentException) {
+            throw CorruptArchiveException("$name can't be read", e)
+        }
+    }
+
     /** Suggested file name for an export made on [date] (ISO `yyyy-MM-dd`). */
     fun fileName(date: String) = "secrt-backup-$date.$EXTENSION"
 
     private fun aad(vaultId: String, entryName: String) = "secrt-archive:$vaultId:$entryName".encodeToByteArray()
 
-    /** Attachments referenced by any revision, so the archive's history is complete. */
-    private fun referencedBlobs(revisions: List<Revision>): List<String> =
+    /** Attachments referenced by any of [revisions] (all of them: the history must stay complete). */
+    fun referencedBlobs(revisions: List<Revision>): List<String> =
         revisions.asSequence()
             .filter { it.recordType == RecordType.ENTRY && it.payload != null }
             .flatMap { SecrtJson.decodeFromString<EntryPayload>(it.payload!!).attachments }
