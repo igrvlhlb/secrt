@@ -104,11 +104,13 @@ fun SecrtApp(session: AppSession, backgroundScope: CoroutineScope) {
     }
 }
 
+// Not private: on the JVM, navigation finds their serializers by reflection, which can't read a
+// private class's members (Android's runtime doesn't check, so only the desktop app crashed).
 @Serializable
-private data object HomeRoute
+internal data object HomeRoute
 
 @Serializable
-private data class EditorRoute(val entryId: String? = null, val folderId: String? = null)
+internal data class EditorRoute(val entryId: String? = null, val folderId: String? = null)
 
 @Composable
 private fun DiaryNavigation(store: DiaryStore, session: AppSession, autoLock: AutoLock, backgroundScope: CoroutineScope) {
