@@ -31,6 +31,7 @@ include(
     ":core:sync",
     ":core:storage",
     ":core:archive",
+    ":core:backup",
     ":core:session",
     ":ui",
     ":app:android",
