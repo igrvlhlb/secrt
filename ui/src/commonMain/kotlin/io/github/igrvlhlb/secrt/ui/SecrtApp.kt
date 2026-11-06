@@ -46,20 +46,26 @@ import kotlinx.serialization.Serializable
  *
  * @param backgroundScope application-wide scope for work that must finish even if the UI goes
  *   away (saving the entry being edited).
+ * @param autoLock pass one that lives as long as [session] where the UI can be recreated while
+ *   the diary stays open (Android activities); see [AutoLock].
  */
 @Composable
-fun SecrtApp(session: AppSession, backgroundScope: CoroutineScope) {
+fun SecrtApp(
+    session: AppSession,
+    backgroundScope: CoroutineScope,
+    autoLock: AutoLock = remember(session) { AutoLock(session, backgroundScope) },
+) {
     SecrtTheme {
         Surface(Modifier.fillMaxSize()) {
             val state by session.state.collectAsStateWithLifecycle()
-            val autoLock = rememberAutoLock()
+            val biometricUnlock by session.biometricUnlockEnabled.collectAsStateWithLifecycle()
             val unlockedScope = viewModel { UnlockedViewModelScope() }
             var creating by remember { mutableStateOf(false) }
             var pendingRecoveryKey by remember { mutableStateOf<String?>(null) }
             var backupToRestore by remember { mutableStateOf<PickedDocument?>(null) }
             val pickBackup = rememberOpenDocument { backupToRestore = it }
 
-            AutoLockEffect(session, autoLock)
+            AutoLockEffect(autoLock)
             // Everything opened while unlocked (ViewModels holding diary content) goes away on lock.
             LaunchedEffect(state) { if (state !is SessionState.Unlocked) unlockedScope.clear() }
 
@@ -85,12 +91,15 @@ fun SecrtApp(session: AppSession, backgroundScope: CoroutineScope) {
                         onCancel = { backupToRestore = null },
                     )
                 }
-                SessionState.Locked -> UnlockScreen { credential ->
-                    when (credential) {
-                        is Credential.Password -> session.unlock(credential.password)
-                        is Credential.RecoveryKey -> session.unlockWithRecoveryKey(credential.recoveryKey)
-                    }
-                }
+                SessionState.Locked -> UnlockScreen(
+                    onUnlock = { credential ->
+                        when (credential) {
+                            is Credential.Password -> session.unlock(credential.password)
+                            is Credential.RecoveryKey -> session.unlockWithRecoveryKey(credential.recoveryKey)
+                        }
+                    },
+                    onBiometricUnlock = if (biometricUnlock) session::unlockWithBiometrics else null,
+                )
                 is SessionState.Unlocked -> when {
                     creating -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                     pendingRecoveryKey != null -> RecoveryKeyScreen(pendingRecoveryKey!!) { pendingRecoveryKey = null }

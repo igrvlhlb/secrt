@@ -47,8 +47,13 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] Web client (in-browser, talks to WebDAV/Drive backups directly; no LAN sync)
 
 ## Security & privacy
-- [ ] Biometric unlock (DEK wrapped by Android Keystore / iOS Keychain)
-- [ ] Configurable auto-lock timeout (currently fixed)
+- [x] Biometric unlock on Android, opt-in: DEK wrapped by an AES-GCM Android Keystore key (StrongBox when
+      present) that needs a Class 3 biometric for every use and dies when fingerprints change
+- [ ] Biometric unlock on iOS (Keychain + LocalAuthentication)
+- [ ] Biometric unlock on Android 8 (left out: the support library's fallback dialog needs an AppCompat theme)
+- [ ] Upgrade `androidx.biometric` from 1.1.0 (latest stable) once 1.4 is stable
+- [x] Configurable auto-lock timeout (immediately … 1 hour, or only on app restart), kept in a plaintext
+      `settings.json` readable while locked
 - [ ] Review memory hygiene: passwords are `String`s today and cannot be wiped
 - [ ] Screenshot protection toggle (FLAG_SECURE is always on for now)
 
@@ -69,4 +74,4 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
       driver already has one)
 - [ ] CI (build + `allTests`)
 - [ ] Release build: R8 rules for JNA/libsodium and SQLCipher, signing
-- [ ] Database schema migrations policy (SQLDelight `.sqm` files) before the first public build
+- [x] Database schema migrations: version-1 snapshot, `verifyMigrations`, upgrade test (see docs/architecture.md)

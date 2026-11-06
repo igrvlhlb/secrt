@@ -116,4 +116,53 @@ class VaultManagerTest {
         assertEquals(39, text.length) // 32 symbols + 7 dashes
         assertContentEquals(bytes, RecoveryKey.decode(text))
     }
+
+    @Test
+    fun exportedDataKeyUnlocksTheSameVault() = runTest {
+        val manager = manager()
+        val (created, _) = manager.create("pw", withRecoveryKey = false)
+
+        val dataKey = manager.exportDataKey(created)
+        val unlocked = manager.unlockWithDataKey(dataKey)
+
+        assertEquals(created.vaultId, unlocked.vaultId)
+        assertContentEquals(created.databaseKey, unlocked.databaseKey)
+        // The caller wiping its copy must not affect the opened keys.
+        dataKey.fill(0)
+        assertContentEquals(created.archiveKey, unlocked.archiveKey)
+        unlocked.close()
+        assertContentEquals(created.databaseKey, manager.unlock("pw").databaseKey)
+    }
+
+    @Test
+    fun foreignOrMalformedDataKeyIsRejected() = runTest {
+        val manager = manager()
+        manager.create("pw", withRecoveryKey = false)
+        val other = VaultManager(fileSystem, "/other".toPath(), SodiumCrypto.create(), Argon2Params.Insecure)
+        val (otherKeys, _) = other.create("pw", withRecoveryKey = false)
+
+        assertFailsWith<InvalidCredentialsException> { manager.unlockWithDataKey(other.exportDataKey(otherKeys)) }
+        assertFailsWith<InvalidCredentialsException> { manager.unlockWithDataKey(ByteArray(32)) }
+        assertFailsWith<InvalidCredentialsException> { manager.unlockWithDataKey(ByteArray(16)) }
+        assertFailsWith<IllegalArgumentException> { manager.exportDataKey(otherKeys) }
+    }
+
+    @Test
+    fun keyCheckIsAddedToHeadersThatPredateIt() = runTest {
+        val manager = manager()
+        val (created, _) = manager.create("pw", withRecoveryKey = true)
+        // A vault.key as written before key-check values existed.
+        val legacy = manager.headerJson().replace(Regex(""","keyCheck":"[^"]*""""), "")
+        assertFalse("keyCheck" in legacy)
+        manager.install(legacy)
+        val dataKey = created.dataKey.copyOf()
+
+        assertFailsWith<InvalidCredentialsException> { manager.unlockWithDataKey(dataKey) }
+
+        manager.exportDataKey(manager.unlock("pw"))
+        assertContentEquals(created.blobKey, manager.unlockWithDataKey(dataKey).blobKey)
+        // Changing the password keeps it.
+        manager.changePassword(manager.unlock("pw"), "new")
+        assertContentEquals(created.blobKey, manager.unlockWithDataKey(dataKey).blobKey)
+    }
 }

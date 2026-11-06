@@ -55,7 +55,7 @@ class VaultManager(
             null
         }
         fileSystem.createDirectories(directory)
-        writeHeader(VaultHeader(vaultId = vaultId, slots = slots))
+        writeHeader(VaultHeader(vaultId = vaultId, slots = slots, keyCheck = keyCheck(dataKey)))
         return VaultKeys(vaultId, crypto, dataKey) to recoveryKey
     }
 
@@ -104,6 +104,49 @@ class VaultManager(
             }
         }
         throw InvalidCredentialsException()
+    }
+
+    /**
+     * Returns a copy of the raw data key of [keys], for a platform key store to keep behind
+     * something other than the password (biometric unlock: the Android Keystore wraps it). The
+     * caller owns the copy and must wipe it as soon as it is wrapped; it must never be written
+     * anywhere in clear.
+     *
+     * Also records the key-check value in `vault.key` if the header predates it, so that
+     * [unlockWithDataKey] can later tell whether a stored key still belongs to this vault. [keys]
+     * came from a password or recovery-key slot, whose AEAD already proved the key is right, so
+     * this is the safe moment to write it.
+     */
+    fun exportDataKey(keys: VaultKeys): ByteArray {
+        val header = readHeader()
+        require(keys.vaultId == header.vaultId) { "These keys belong to another vault" }
+        if (header.keyCheck == null) writeHeader(header.copy(keyCheck = keyCheck(keys.dataKey)))
+        return keys.dataKey.copyOf()
+    }
+
+    /**
+     * Opens the vault with a raw data key previously obtained from [exportDataKey], skipping the
+     * key slots. The caller keeps ownership of [dataKey] (a copy goes into the returned keys) and
+     * should wipe it.
+     *
+     * A raw key bypasses the slots' authenticated encryption, so it is checked first against the
+     * header's key-check value: a subkey derived from the data key (same KDF and domain separation
+     * as the other subkeys, see [VaultKeys]). It reveals nothing about the 256-bit key, and turns a
+     * stale or foreign key (a wrapped key left over from a replaced vault, a bug) into a clear
+     * [InvalidCredentialsException] here, instead of an unreadable database or attachments
+     * encrypted under the wrong key later. Comparing against a stored value, rather than e.g.
+     * trying to open the database, keeps the check in the vault, independent of storage. Headers
+     * without a key-check value (written before it existed, and never exported since) are refused.
+     *
+     * @throws InvalidCredentialsException if [dataKey] is not this vault's data key.
+     */
+    fun unlockWithDataKey(dataKey: ByteArray): VaultKeys {
+        val header = readHeader()
+        val expected = header.keyCheck?.decodeBase64() ?: throw InvalidCredentialsException()
+        if (dataKey.size != Crypto.KEY_BYTES) throw InvalidCredentialsException()
+        val actual = keyCheck(dataKey).decodeBase64()
+        if (!constantTimeEquals(expected, actual)) throw InvalidCredentialsException()
+        return VaultKeys(header.vaultId, crypto, dataKey.copyOf())
     }
 
     /** Replaces the password. Data stays encrypted with the same data key. */
@@ -164,6 +207,16 @@ class VaultManager(
         }
     }
 
+    // Not secret (it's stored in vault.key), so it isn't wiped.
+    private fun keyCheck(dataKey: ByteArray): String = crypto.deriveSubkey(dataKey, KEY_CHECK_SUBKEY_ID, "secrtkcv").toBase64()
+
+    private fun constantTimeEquals(a: ByteArray, b: ByteArray): Boolean {
+        if (a.size != b.size) return false
+        var diff = 0
+        for (i in a.indices) diff = diff or (a[i].toInt() xor b[i].toInt())
+        return diff == 0
+    }
+
     private fun slotAad(vaultId: String, slotType: String) = "secrt-slot:$vaultId:$slotType".encodeToByteArray()
 
     private fun readHeader(): VaultHeader = parseHeader(headerJson())
@@ -191,5 +244,8 @@ class VaultManager(
     private companion object {
         const val SLOT_PASSWORD = "password"
         const val SLOT_RECOVERY = "recovery"
+
+        /** Follows the subkey ids used by [VaultKeys] (1-4). */
+        const val KEY_CHECK_SUBKEY_ID = 5
     }
 }

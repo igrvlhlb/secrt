@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Restore
@@ -38,6 +39,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,8 +54,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import io.github.igrvlhlb.secrt.session.BiometricException
 import io.github.igrvlhlb.secrt.vault.Credential
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 const val MIN_PASSWORD_LENGTH = 8
@@ -182,14 +190,66 @@ fun SetupScreen(onCreate: suspend (password: String, withRecoveryKey: Boolean) -
     }
 }
 
+/**
+ * @param onBiometricUnlock set when fingerprint unlock is on: it is offered right away (once the
+ *   app is in front), and again from a button; the password form stays available as fallback.
+ */
 @Composable
-fun UnlockScreen(onUnlock: suspend (Credential) -> Unit) {
+fun UnlockScreen(onUnlock: suspend (Credential) -> Unit, onBiometricUnlock: (suspend () -> Unit)? = null) {
+    val scope = rememberCoroutineScope()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // Prompt by itself once when the diary locks, and again each time the app comes back to the front.
+    var autoPrompted by remember { mutableStateOf(false) }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { autoPrompted = false }
+    var prompting by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+
+    fun promptForFingerprint() {
+        val unlock = onBiometricUnlock ?: return
+        if (prompting) return
+        prompting = true
+        notice = null
+        scope.launch {
+            try {
+                unlock()
+            } catch (e: BiometricException.Cancelled) {
+                // The password form is right there.
+            } catch (e: BiometricException) {
+                notice = e.message
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                notice = e.message ?: "Couldn't open the diary"
+            } finally {
+                prompting = false
+            }
+        }
+    }
+
+    LaunchedEffect(onBiometricUnlock != null, autoPrompted) {
+        if (onBiometricUnlock == null || autoPrompted) return@LaunchedEffect
+        // A prompt can't be shown over an app in the background (e.g. it just locked there): wait.
+        lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+        autoPrompted = true
+        promptForFingerprint()
+    }
+
     CredentialScreen(
         title = "Diary locked",
         passwordHint = "Enter your password to open your diary.",
         recoveryHint = "Enter the recovery key you saved when you created the diary.",
         submitLabel = "Unlock",
         onSubmit = onUnlock,
+        notice = notice,
+        extraActions = {
+            if (onBiometricUnlock != null) {
+                OutlinedButton(onClick = ::promptForFingerprint, enabled = !prompting, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Icon(Icons.Outlined.Fingerprint, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Unlock with fingerprint")
+                }
+            }
+        },
     )
 }
 
@@ -206,7 +266,12 @@ fun RestoreScreen(fileName: String, onRestore: suspend (Credential) -> Unit, onC
     )
 }
 
-/** Asks for the password, or the recovery key instead, and reports what went wrong. */
+/**
+ * Asks for the password, or the recovery key instead, and reports what went wrong.
+ *
+ * @param notice something the user should know before typing (e.g. why the fingerprint wasn't offered).
+ * @param extraActions shown under the submit button.
+ */
 @Composable
 private fun CredentialScreen(
     title: String,
@@ -215,6 +280,8 @@ private fun CredentialScreen(
     submitLabel: String,
     onSubmit: suspend (Credential) -> Unit,
     onCancel: (() -> Unit)? = null,
+    notice: String? = null,
+    extraActions: @Composable () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var useRecoveryKey by remember { mutableStateOf(false) }
@@ -240,6 +307,11 @@ private fun CredentialScreen(
     }
 
     AuthLayout(if (useRecoveryKey) Icons.Outlined.Key else Icons.Outlined.Lock, title, if (useRecoveryKey) recoveryHint else passwordHint) {
+        notice?.let {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.fillMaxWidth()) {
+                Text(it, color = MaterialTheme.colorScheme.onErrorContainer, modifier = Modifier.padding(16.dp))
+            }
+        }
         if (useRecoveryKey) {
             OutlinedTextField(
                 value = secret,
@@ -258,6 +330,7 @@ private fun CredentialScreen(
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         BusyButton(submitLabel, busy, secret.isNotEmpty(), ::submit)
+        extraActions()
         TextButton(onClick = { useRecoveryKey = !useRecoveryKey; secret = ""; error = null }) {
             Text(if (useRecoveryKey) "Use password instead" else "Forgot password? Use recovery key")
         }

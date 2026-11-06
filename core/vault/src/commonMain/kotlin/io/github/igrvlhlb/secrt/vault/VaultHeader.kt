@@ -12,6 +12,11 @@ internal data class VaultHeader(
     val format: Int = CURRENT_FORMAT,
     val vaultId: String,
     val slots: List<KeySlot>,
+    /**
+     * Base64 key-check value of the data key (see [VaultManager.unlockWithDataKey]). Optional, so
+     * headers written before it existed still read as format 1; added when first needed.
+     */
+    val keyCheck: String? = null,
 ) {
     companion object {
         const val CURRENT_FORMAT = 1

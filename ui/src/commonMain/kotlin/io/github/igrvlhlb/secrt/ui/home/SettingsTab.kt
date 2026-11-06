@@ -46,7 +46,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material.icons.outlined.Fingerprint
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
+import androidx.compose.ui.semantics.Role
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.igrvlhlb.secrt.session.AppSession
+import io.github.igrvlhlb.secrt.session.AutoLockTimeout
+import io.github.igrvlhlb.secrt.session.BiometricAvailability
+import io.github.igrvlhlb.secrt.session.BiometricException
 import io.github.igrvlhlb.secrt.ui.auth.MIN_PASSWORD_LENGTH
 import io.github.igrvlhlb.secrt.ui.auth.PasswordField
 import io.github.igrvlhlb.secrt.ui.auth.RecoveryKeyCard
@@ -65,7 +82,39 @@ fun SettingsTab(session: AppSession) {
     var shownKey by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf<String?>(null) }
     val autoLock = LocalAutoLock.current
+    val settings by session.settings.collectAsStateWithLifecycle()
+    val biometricEnabled by session.biometricUnlockEnabled.collectAsStateWithLifecycle()
+    var biometricAvailability by remember { mutableStateOf(session.biometricAvailability()) }
+    var biometricBusy by remember { mutableStateOf(false) }
+    var choosingAutoLock by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { hasRecoveryKey = session.hasRecoveryKey() }
+    // The user may have just enrolled a fingerprint in the system settings.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { biometricAvailability = session.biometricAvailability() }
+
+    fun setBiometricUnlock(on: Boolean) {
+        biometricBusy = true
+        scope.launch {
+            val message = try {
+                if (on) {
+                    // The system prompt must not count as leaving the app.
+                    autoLock.pause()
+                    session.enableBiometricUnlock()
+                    "Fingerprint unlock is on"
+                } else {
+                    session.disableBiometricUnlock()
+                    null
+                }
+            } catch (e: BiometricException.Cancelled) {
+                null
+            } catch (e: BiometricException) {
+                e.message
+            } finally {
+                if (on) autoLock.resume()
+                biometricBusy = false
+            }
+            message?.let { snackbar.showSnackbar(it) }
+        }
+    }
 
     /** Runs a backup operation with a blocking progress dialog, reporting failures in the snackbar. */
     fun runWithProgress(label: String, action: suspend () -> String) {
@@ -148,7 +197,24 @@ fun SettingsTab(session: AppSession) {
                 }
             }
             ElevatedCard {
-                SettingRow(Icons.Outlined.Lock, "Lock now", "The diary also locks a minute after you leave the app") { scope.launch { session.lock() } }
+                SettingRow(Icons.Outlined.Timer, "Auto-lock", settings.autoLock.description) { choosingAutoLock = true }
+                if (biometricAvailability != BiometricAvailability.Unsupported || biometricEnabled) {
+                    HorizontalDivider()
+                    SwitchRow(
+                        Icons.Outlined.Fingerprint,
+                        "Unlock with fingerprint",
+                        when {
+                            biometricEnabled -> "Your fingerprint opens the diary. The password still works."
+                            biometricAvailability == BiometricAvailability.NoneEnrolled -> "Add a fingerprint in your phone's settings first"
+                            else -> "Open the diary with your fingerprint instead of typing the password"
+                        },
+                        checked = biometricEnabled,
+                        enabled = !biometricBusy && (biometricEnabled || biometricAvailability == BiometricAvailability.Available),
+                        onCheckedChange = ::setBiometricUnlock,
+                    )
+                }
+                HorizontalDivider()
+                SettingRow(Icons.Outlined.Lock, "Lock now", "Close the diary until you unlock it again") { scope.launch { session.lock() } }
             }
             ElevatedCard {
                 ListItem(
@@ -167,6 +233,16 @@ fun SettingsTab(session: AppSession) {
         }
     }
 
+    if (choosingAutoLock) {
+        AutoLockDialog(
+            current = settings.autoLock,
+            onSelect = { option ->
+                choosingAutoLock = false
+                scope.launch { session.updateSettings { it.copy(autoLock = option) } }
+            },
+            onDismiss = { choosingAutoLock = false },
+        )
+    }
     if (changingPassword) {
         ChangePasswordDialog(
             onChange = { current, new -> session.changePassword(current, new); snackbar.showSnackbar("Password changed") },
@@ -227,6 +303,66 @@ private fun SettingRow(icon: ImageVector, title: String, subtitle: String, onCli
         headlineContent = { Text(title) },
         supportingContent = { if (subtitle.isNotEmpty()) Text(subtitle) },
         modifier = Modifier.clickable(onClick = onClick),
+    )
+}
+
+@Composable
+private fun SwitchRow(icon: ImageVector, title: String, subtitle: String, checked: Boolean, enabled: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    ListItem(
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        leadingContent = { Icon(icon, contentDescription = null) },
+        headlineContent = { Text(title) },
+        supportingContent = { Text(subtitle) },
+        trailingContent = { Switch(checked = checked, onCheckedChange = null, enabled = enabled) },
+        modifier = Modifier.toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange),
+    )
+}
+
+private val AutoLockTimeout.label: String
+    get() = when (this) {
+        AutoLockTimeout.Immediately -> "Immediately"
+        AutoLockTimeout.OneMinute -> "After 1 minute"
+        AutoLockTimeout.FiveMinutes -> "After 5 minutes"
+        AutoLockTimeout.FifteenMinutes -> "After 15 minutes"
+        AutoLockTimeout.OneHour -> "After 1 hour"
+        AutoLockTimeout.OnAppRestart -> "When the app restarts"
+    }
+
+private val AutoLockTimeout.description: String
+    get() = when (this) {
+        AutoLockTimeout.Immediately -> "As soon as you leave the app"
+        AutoLockTimeout.OnAppRestart -> "Only when the app is closed or the phone restarts"
+        else -> "$label in the background"
+    }
+
+@Composable
+private fun AutoLockDialog(current: AutoLockTimeout, onSelect: (AutoLockTimeout) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Lock the diary") },
+        text = {
+            Column(Modifier.selectableGroup()) {
+                AutoLockTimeout.entries.forEach { option ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                            .selectable(selected = option == current, role = Role.RadioButton, onClick = { onSelect(option) })
+                            .padding(vertical = 12.dp),
+                    ) {
+                        RadioButton(selected = option == current, onClick = null)
+                        Spacer(Modifier.width(16.dp))
+                        Text(option.label)
+                    }
+                }
+                Text(
+                    "Time the app can spend in the background before it asks for your password again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

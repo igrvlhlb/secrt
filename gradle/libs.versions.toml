@@ -11,6 +11,8 @@ compose-material-icons = "1.7.3"
 androidx-lifecycle-mp = "2.11.0"
 androidx-navigation-mp = "2.10.0"
 androidx-activity-compose = "1.13.0"
+androidx-biometric = "1.1.0"
+androidx-fragment = "1.9.1"
 markdown-renderer = "0.46.0"
 
 kotlinx-coroutines = "1.11.0"
@@ -60,4 +62,6 @@ androidx-lifecycle-viewmodel-compose = { module = "org.jetbrains.androidx.lifecy
 androidx-lifecycle-runtime-compose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidx-lifecycle-mp" }
 androidx-navigation-compose = { module = "org.jetbrains.androidx.navigation:navigation-compose", version.ref = "androidx-navigation-mp" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
+androidx-biometric = { module = "androidx.biometric:biometric", version.ref = "androidx-biometric" }
+androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "androidx-fragment" }
 markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdown-renderer" }

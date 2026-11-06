@@ -42,6 +42,10 @@ sealed interface SessionState {
 /**
  * Owns the vault's lifecycle: creating it, unlocking it into an open [DiaryStore], and locking it
  * again (closing the database and wiping keys from memory).
+ *
+ * @param biometrics the platform's [BiometricKeyStore], or `null` where biometric unlock isn't
+ *   offered (desktop).
+ * @param settingsFile where [settings] are kept: plaintext, readable while locked.
  */
 class AppSession(
     private val fileSystem: FileSystem,
@@ -50,6 +54,8 @@ class AppSession(
     private val cryptoProvider: suspend () -> Crypto,
     private val ioDispatcher: CoroutineDispatcher,
     private val argon2Params: Argon2Params = Argon2Params.Default,
+    private val biometrics: BiometricKeyStore? = null,
+    settingsFile: Path = vaultDirectory / "settings.json",
 ) {
     private val lock = Mutex()
     private var keys: VaultKeys? = null
@@ -60,6 +66,20 @@ class AppSession(
         if (fileSystem.exists(vaultDirectory / "vault.key")) SessionState.Locked else SessionState.NoVault,
     )
     val state: StateFlow<SessionState> = _state.asStateFlow()
+
+    private val settingsStore = AppSettingsStore(fileSystem, settingsFile)
+
+    /** App preferences. Available while locked. */
+    val settings: StateFlow<AppSettings> get() = settingsStore.settings
+
+    suspend fun updateSettings(transform: (AppSettings) -> AppSettings) = withContext(ioDispatcher) { settingsStore.update(transform) }
+
+    private val _biometricUnlockEnabled = MutableStateFlow(biometrics?.hasKey() == true)
+
+    /** Whether the lock screen offers the fingerprint. Off unless the user turned it on. */
+    val biometricUnlockEnabled: StateFlow<Boolean> = _biometricUnlockEnabled.asStateFlow()
+
+    fun biometricAvailability(): BiometricAvailability = biometrics?.availability() ?: BiometricAvailability.Unsupported
 
     /** Creates the vault and unlocks it. @return the recovery key to show once, if requested. */
     suspend fun create(password: String, withRecoveryKey: Boolean): String? = io {
@@ -77,6 +97,61 @@ class AppSession(
     /** @throws InvalidCredentialsException */
     suspend fun unlockWithRecoveryKey(recoveryKey: String) = io {
         open(vault().unlockWithRecoveryKey(recoveryKey), viaRecoveryKey = true)
+    }
+
+    /**
+     * Turns biometric unlock on: the platform prompts the user, then keeps the data key wrapped
+     * by a key only their fingerprint unlocks.
+     *
+     * @throws BiometricException if the user cancels or authentication fails; it stays off then.
+     */
+    suspend fun enableBiometricUnlock() {
+        val store = requireNotNull(biometrics) { "Biometric unlock isn't available here" }
+        // Exported under the lock, but prompted for outside it: the prompt can stay up a long time.
+        val dataKey = io { vault().exportDataKey(requireNotNull(keys) { "Diary is locked" }) }
+        try {
+            store.store(dataKey)
+        } finally {
+            dataKey.fill(0)
+        }
+        _biometricUnlockEnabled.value = true
+    }
+
+    /** Turns biometric unlock off, deleting the wrapped key and the hardware key behind it. */
+    suspend fun disableBiometricUnlock() {
+        withContext(ioDispatcher) { biometrics?.delete() }
+        _biometricUnlockEnabled.value = false
+    }
+
+    /**
+     * Prompts for the fingerprint and opens the diary with the data key it releases.
+     *
+     * @throws BiometricException. After [BiometricException.KeyInvalidated] the feature is off,
+     *   and only the password (or recovery key) opens the diary.
+     */
+    suspend fun unlockWithBiometrics() {
+        val store = requireNotNull(biometrics) { "Biometric unlock isn't available here" }
+        val dataKey = try {
+            store.retrieve()
+        } catch (e: BiometricException.KeyInvalidated) {
+            disableBiometricUnlock()
+            throw e
+        }
+        try {
+            io {
+                // The password may have won the race while the prompt was up.
+                if (_state.value != SessionState.Locked) return@io
+                val newKeys = try {
+                    vault().unlockWithDataKey(dataKey)
+                } catch (e: InvalidCredentialsException) {
+                    disableBiometricUnlock()
+                    throw BiometricException.KeyInvalidated("The saved fingerprint key doesn't belong to this diary")
+                }
+                open(newKeys, viaRecoveryKey = false)
+            }
+        } finally {
+            dataKey.fill(0)
+        }
     }
 
     suspend fun lock() = io {
@@ -189,8 +264,12 @@ class AppSession(
 
     private fun unlockedStore(): DiaryStore = (_state.value as? SessionState.Unlocked ?: error("Diary is locked")).store
 
-    /** Removes everything a vault leaves on disk. Only valid while there is no usable vault. */
+    /**
+     * Removes everything a vault leaves on disk, including a wrapped key of a previous vault.
+     * Only valid while there is no usable vault.
+     */
     private suspend fun wipeLocalData() {
+        disableBiometricUnlock()
         driverFactory.delete()
         fileSystem.deleteRecursively(vaultDirectory / "blobs", mustExist = false)
         vault().delete()

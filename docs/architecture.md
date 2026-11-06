@@ -34,7 +34,23 @@ decisions and core architecture first, then features, then UI/UX.
   - Recovery slot (optional): random 128+ bit key shown as words/groups → wraps the same DEK.
   - Password change = rewrap the DEK only; no re-encryption.
 - Device identity: Ed25519/X25519 keypair per device, stored inside the encrypted DB. Used for pairing and the LAN channel.
-- Desktop always asks for the password on open (per notes). Mobile biometric unlock (DEK wrapped by Keystore/Keychain) comes later. Auto-lock on idle.
+- Desktop always asks for the password on open (per notes).
+- **Biometric unlock (Android, opt-in, off by default).** Turning it on generates an AES-256-GCM key
+  in the Android Keystore (StrongBox if the device has one, else the TEE) that requires a Class 3
+  biometric for *every* use (`BiometricPrompt.CryptoObject`) and is invalidated when a fingerprint
+  is enrolled or all are removed. The DEK, encrypted with it, sits in `files/biometric.key`; the
+  plaintext DEK never touches disk. Unlocking decrypts it behind the prompt and opens the vault with
+  `VaultManager.unlockWithDataKey`, which first checks the DEK against a key-check value in
+  `vault.key` (a KDF subkey of the DEK; optional field, so format 1 still reads). An invalidated or
+  mismatched key turns the feature off and the lock screen says why. Creating or restoring a diary
+  deletes any leftover biometric key; changing the password doesn't affect it (same DEK). Only the
+  platform-neutral `BiometricKeyStore` interface is common code; platforms without one (desktop)
+  simply don't offer the toggle.
+- Auto-lock after the app spends a user-chosen time in the background (default 1 minute; also
+  "immediately" and "only on app restart"). A timer closes the database while the app is away and
+  the elapsed time is checked again on return, in case the system froze the process. Settings that
+  must work while locked live in a small plaintext `settings.json` next to `vault.key`; nothing in
+  it is sensitive.
 
 ## Data model (`core:storage`, SQLDelight)
 - `revision(rev_id, record_type, record_id, parent_rev_ids, device_id, seq, hlc, deleted, payload)`: **source of truth**, append-only.
@@ -48,6 +64,22 @@ decisions and core architecture first, then features, then UI/UX.
 - `peer(device_id, name, identity_pubkey, version_vector)` and `self(device_id, keys, next_seq)`.
 - Attachments: encrypted files on disk (libsodium secretstream), **content-addressed** (`blob_id = HMAC(DEK, sha256(plain))`). They are immutable, so they never conflict and are deduplicated.
 - Keeping full revision history is cheap for text and gives "entry history" for free.
+
+### Changing the database schema
+Diaries already exist on phones, so the schema only moves forward through migrations:
+1. Edit the `CREATE TABLE`/`CREATE INDEX` statements in the `.sq` files as usual.
+2. Add `core/storage/src/commonMain/sqldelight/migrations/<N>.sqm`, where `N` is the version being
+   upgraded *from* (the first migration is `1.sqm`). It holds the `ALTER TABLE`/`CREATE ...`
+   statements that turn version `N` into `N + 1`. SQLDelight derives `Schema.version` from it and
+   the drivers run it when they open an older database.
+3. Run `./gradlew :core:storage:generateCommonMainSecrtDatabaseSchema` to add the `<N + 1>.db`
+   snapshot next to `databases/1.db`, and commit it. Never edit or delete existing snapshots: each
+   one is a schema some installed version has.
+4. `verifySqlDelightMigration` (run by `check` and `:core:storage:jvmTest`) fails if any snapshot
+   plus the migrations after it doesn't end up identical to the `.sq` schema.
+   `SchemaMigrationTest` opens every snapshot with the current code and reads version-1 data back.
+Derived tables (`entry`, `folder`, ...) could instead be rebuilt from `revision` rather than
+migrated column by column; the revision log itself must always be migrated in place.
 
 ## Sync engine (`core:sync`, pure Kotlin, transport-agnostic)
 - Each device numbers its own revisions (`seq`). A **version vector** `{deviceId → max seq seen}` says what a replica has.
@@ -146,7 +178,7 @@ Rule: `core/*` is `commonMain` only, apart from the `DriverFactory` and crypto a
 4. `core/backup`: WebDAV, then Google Drive.
 5. LAN: QR pairing, encrypted channel, sync. Then numeric code + PAKE.
 6. Full UI/UX: editor, folder tree, labels, attachments, search, conflict resolver, history, settings.
-- **Later:** OneDrive/Dropbox/S3, biometric unlock, Markdown import, web client. The web client could run fully in the browser against the WebDAV/Drive backup with client-side crypto, so no hosting of user data is needed. Browsers can't do raw TCP or mDNS, so it wouldn't use LAN sync.
+- **Later:** OneDrive/Dropbox/S3, iOS biometric unlock, Markdown import, web client. The web client could run fully in the browser against the WebDAV/Drive backup with client-side crypto, so no hosting of user data is needed. Browsers can't do raw TCP or mDNS, so it wouldn't use LAN sync.
 
 ## Verification
 - `./gradlew allTests` with `commonTest` for every core module, run on JVM, Android, and iOS simulator:

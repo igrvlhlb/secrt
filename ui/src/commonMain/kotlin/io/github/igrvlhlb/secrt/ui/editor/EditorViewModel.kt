@@ -104,6 +104,12 @@ class EditorViewModel(
         backgroundScope.launch { save() }
     }
 
+    /** Saves pending changes and returns once they are stored, e.g. right before the diary locks. */
+    suspend fun saveNow() {
+        pendingSave?.cancel()
+        save()
+    }
+
     fun addAttachment(file: PickedFile) {
         viewModelScope.launch {
             try {
