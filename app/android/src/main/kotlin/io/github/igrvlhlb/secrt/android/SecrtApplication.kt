@@ -2,6 +2,7 @@ package io.github.igrvlhlb.secrt.android
 
 import android.app.Application
 import io.github.igrvlhlb.secrt.crypto.SodiumCrypto
+import io.github.igrvlhlb.secrt.session.AndroidBiometricKeyStore
 import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.storage.SqlCipherDriverFactory
 import io.github.igrvlhlb.secrt.ui.AutoLock
@@ -16,6 +17,8 @@ class SecrtApplication : Application() {
 
     val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    val biometrics: AndroidBiometricKeyStore by lazy { AndroidBiometricKeyStore(this) }
+
     val session: AppSession by lazy {
         AppSession(
             fileSystem = FileSystem.SYSTEM,
@@ -23,6 +26,7 @@ class SecrtApplication : Application() {
             driverFactory = SqlCipherDriverFactory(this),
             cryptoProvider = { SodiumCrypto.create() },
             ioDispatcher = Dispatchers.IO,
+            biometrics = biometrics,
         )
     }
 

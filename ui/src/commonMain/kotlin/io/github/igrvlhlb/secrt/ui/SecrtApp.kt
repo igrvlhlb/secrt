@@ -58,6 +58,7 @@ fun SecrtApp(
     SecrtTheme {
         Surface(Modifier.fillMaxSize()) {
             val state by session.state.collectAsStateWithLifecycle()
+            val biometricUnlock by session.biometricUnlockEnabled.collectAsStateWithLifecycle()
             val unlockedScope = viewModel { UnlockedViewModelScope() }
             var creating by remember { mutableStateOf(false) }
             var pendingRecoveryKey by remember { mutableStateOf<String?>(null) }
@@ -90,12 +91,15 @@ fun SecrtApp(
                         onCancel = { backupToRestore = null },
                     )
                 }
-                SessionState.Locked -> UnlockScreen { credential ->
-                    when (credential) {
-                        is Credential.Password -> session.unlock(credential.password)
-                        is Credential.RecoveryKey -> session.unlockWithRecoveryKey(credential.recoveryKey)
-                    }
-                }
+                SessionState.Locked -> UnlockScreen(
+                    onUnlock = { credential ->
+                        when (credential) {
+                            is Credential.Password -> session.unlock(credential.password)
+                            is Credential.RecoveryKey -> session.unlockWithRecoveryKey(credential.recoveryKey)
+                        }
+                    },
+                    onBiometricUnlock = if (biometricUnlock) session::unlockWithBiometrics else null,
+                )
                 is SessionState.Unlocked -> when {
                     creating -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                     pendingRecoveryKey != null -> RecoveryKeyScreen(pendingRecoveryKey!!) { pendingRecoveryKey = null }
