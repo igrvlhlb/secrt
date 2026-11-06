@@ -49,6 +49,22 @@ decisions and core architecture first, then features, then UI/UX.
 - Attachments: encrypted files on disk (libsodium secretstream), **content-addressed** (`blob_id = HMAC(DEK, sha256(plain))`). They are immutable, so they never conflict and are deduplicated.
 - Keeping full revision history is cheap for text and gives "entry history" for free.
 
+### Changing the database schema
+Diaries already exist on phones, so the schema only moves forward through migrations:
+1. Edit the `CREATE TABLE`/`CREATE INDEX` statements in the `.sq` files as usual.
+2. Add `core/storage/src/commonMain/sqldelight/migrations/<N>.sqm`, where `N` is the version being
+   upgraded *from* (the first migration is `1.sqm`). It holds the `ALTER TABLE`/`CREATE ...`
+   statements that turn version `N` into `N + 1`. SQLDelight derives `Schema.version` from it and
+   the drivers run it when they open an older database.
+3. Run `./gradlew :core:storage:generateCommonMainSecrtDatabaseSchema` to add the `<N + 1>.db`
+   snapshot next to `databases/1.db`, and commit it. Never edit or delete existing snapshots: each
+   one is a schema some installed version has.
+4. `verifySqlDelightMigration` (run by `check` and `:core:storage:jvmTest`) fails if any snapshot
+   plus the migrations after it doesn't end up identical to the `.sq` schema.
+   `SchemaMigrationTest` opens every snapshot with the current code and reads version-1 data back.
+Derived tables (`entry`, `folder`, ...) could instead be rebuilt from `revision` rather than
+migrated column by column; the revision log itself must always be migrated in place.
+
 ## Sync engine (`core:sync`, pure Kotlin, transport-agnostic)
 - Each device numbers its own revisions (`seq`). A **version vector** `{deviceId → max seq seen}` says what a replica has.
 - Sync = exchange vectors, then send the missing revisions both ways. Operations are idempotent and order-independent, so replicas converge.

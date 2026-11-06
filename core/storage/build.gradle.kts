@@ -7,6 +7,12 @@ sqldelight {
     databases {
         create("SecrtDatabase") {
             packageName.set("io.github.igrvlhlb.secrt.storage.db")
+            // Snapshots of every released schema version (`<version>.db`), written by
+            // `generateCommonMainSecrtDatabaseSchema`. verifyMigrations checks that each snapshot plus
+            // the `.sqm` migrations after it ends up identical to the current `.sq` schema, so a schema
+            // change without a migration fails the build. See docs/architecture.md.
+            schemaOutputDirectory.set(file("src/commonMain/sqldelight/databases"))
+            verifyMigrations.set(true)
         }
     }
 }
@@ -33,4 +39,10 @@ kotlin {
             implementation(libs.sqldelight.jvm.driver)
         }
     }
+}
+
+// `check` already runs the migration verification; tie it to the tests too, since `jvmTest` is what
+// everyone runs.
+tasks.named("jvmTest") {
+    dependsOn("verifySqlDelightMigration")
 }

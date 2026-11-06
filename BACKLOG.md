@@ -62,4 +62,4 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] UI tests (Compose) and an on-device test that the SQLCipher file holds no plaintext
 - [ ] CI (build + `allTests`)
 - [ ] Release build: R8 rules for JNA/libsodium and SQLCipher, signing
-- [ ] Database schema migrations policy (SQLDelight `.sqm` files) before the first public build
+- [x] Database schema migrations: version-1 snapshot, `verifyMigrations`, upgrade test (see docs/architecture.md)
