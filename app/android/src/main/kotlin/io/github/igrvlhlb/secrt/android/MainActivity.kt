@@ -1,5 +1,6 @@
 package io.github.igrvlhlb.secrt.android
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -17,6 +18,12 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
         val app = application as SecrtApplication
         app.biometrics.attach(this)
-        setContent { SecrtApp(app.session, app.backgroundScope, app.autoLock) }
+        DebugHooks.handle(intent, app.lan)
+        setContent { SecrtApp(app.session, app.backgroundScope, app.autoLock, app.lan) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        DebugHooks.handle(intent, (application as SecrtApplication).lan)
     }
 }
