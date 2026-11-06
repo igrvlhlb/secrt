@@ -35,8 +35,14 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] Markdown import (from other apps / previous plaintext exports)
 
 ## Platforms
-- [ ] Desktop (JVM) app module: window, file picker, encrypted DB via `sqlite-jdbc-crypt`
+- [x] Desktop (JVM) app module: window, file pickers, encrypted DB via `sqlite-jdbc-crypt`, restore from a phone backup
 - [ ] Desktop: generate the pairing QR code
+- [ ] Desktop: sign and notarize the macOS app (today the `.dmg` is unsigned, so Gatekeeper blocks it); `.icns` icon
+- [ ] Desktop: Windows/Linux packages built and tried on those OSes (declared, never built)
+- [ ] Desktop: idle auto-lock while the window stays open; today it locks after being minimized for a
+      minute, on system sleep or user switch, and on quit, but not when merely left in the background
+- [ ] Desktop: keyboard shortcuts (new entry, search, lock) and a menu bar
+- [ ] Desktop: a two-pane layout (list + editor) for wide windows; today the phone layout is centered
 - [ ] iOS app: SQLCipher-linked SQLDelight native driver, Keychain, photo picker
 - [ ] Web client (in-browser, talks to WebDAV/Drive backups directly; no LAN sync)
 
@@ -59,7 +65,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 
 ## Engineering
 - [ ] Localization (strings are hard-coded in English)
-- [ ] UI tests (Compose) and an on-device test that the SQLCipher file holds no plaintext
+- [ ] UI tests (Compose) and an on-device test that the SQLCipher file holds no plaintext (the JVM
+      driver already has one)
 - [ ] CI (build + `allTests`)
 - [ ] Release build: R8 rules for JNA/libsodium and SQLCipher, signing
 - [ ] Database schema migrations policy (SQLDelight `.sqm` files) before the first public build

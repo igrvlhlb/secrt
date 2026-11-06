@@ -124,6 +124,17 @@ app/android, app/desktop, iosApp (Xcode)
 ```
 Rule: `core/*` is `commonMain` only, apart from the `DriverFactory` and crypto actuals. Platform differences live in `platform/*` behind interfaces.
 
+## Running the desktop app
+- `./gradlew :app:desktop:run` opens the app; `./gradlew :app:desktop:packageDmg` builds an
+  (unsigned) macOS installer in `app/desktop/build/compose/binaries/`.
+- Data lives in `~/Library/Application Support/secrt` (macOS), `%APPDATA%\secrt` (Windows) or
+  `$XDG_DATA_HOME/secrt`, defaulting to `~/.local/share/secrt` (Linux): `vault/` (key slots and
+  attachments) and `secrt.db` (SQLCipher-encrypted via `sqlite-jdbc-crypt`).
+- To use another directory, e.g. a throwaway diary: `-Psecrt.dataDir=/some/dir` on `run`, or
+  `-Dsecrt.dataDir=…` / `SECRT_DATA_DIR=…` for the packaged app.
+- To move a diary from the phone: export a backup in Settings, then pick "Restore from a backup file"
+  on the desktop's first screen.
+
 ## Roadmap
 0. **Spikes:**
    - SQLDelight + SQLCipher + FTS5 on all three targets (Android `net.zetetic:sqlcipher-android`, iOS SQLCipher linked into the native driver, JVM `sqlite-jdbc-crypt`).
