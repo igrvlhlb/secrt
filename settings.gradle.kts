@@ -29,4 +29,5 @@ include(
     ":core:session",
     ":ui",
     ":app:android",
+    ":app:desktop",
 )
