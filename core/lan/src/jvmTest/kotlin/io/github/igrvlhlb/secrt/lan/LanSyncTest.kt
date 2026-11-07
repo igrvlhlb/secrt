@@ -250,6 +250,28 @@ class LanSyncTest {
     }
 
     @Test
+    fun aJoinIsCompleteByTheTimeTheDiaryOpens() = test {
+        // The password screen goes away, cancelling what it started, as soon as the diary opens.
+        computer.session.create("pw", withRecoveryKey = false)
+        computer.store.saveEntry("e1", draft("Day one"))
+        val host = computer.listen()
+        val newPhone = device("New phone")
+        val sent = scope.launch { host.events.first { it is LanHost.Event.DiarySent } }
+        newPhone.lan.join(host.newCode())
+        sent.join()
+
+        val screen = scope.launch { newPhone.lan.completeJoin(Credential.Password("pw")) }
+        newPhone.session.state.first { it is SessionState.Unlocked }
+        screen.cancel()
+
+        // Both list each other as in sync: the archive held the whole diary.
+        val computerOnPhone = newPhone.store.peers.all().single()
+        assertNotNull(computerOnPhone.lastSyncAt)
+        assertNotNull(computer.store.peers.all().single().lastSyncAt)
+        assertEquals(SyncStats(received = 0, sent = 0), newPhone.lan.sync(computerOnPhone))
+    }
+
+    @Test
     fun twoPhonesPairAndSyncWhicheverShowsTheCode() = test {
         // A phone sets up another one, then each shows a code the other scans: both can start syncs.
         phone.session.create("pw", withRecoveryKey = false)

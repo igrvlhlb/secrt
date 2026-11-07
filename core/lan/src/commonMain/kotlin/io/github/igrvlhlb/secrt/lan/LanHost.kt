@@ -175,9 +175,12 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
                     return false
                 }
                 messages.send(Hello(lan.ownName(), store.deviceId, vaultId))
+                val sent = store.versionVector()
                 lan.sendDiary(messages)
                 // Its device id comes with the first sync: restoring gives it a new one.
                 store.peers.pair(peerKey, peerName, deviceId = null, addresses = emptyList(), now = lan.now())
+                // It now holds everything this one had.
+                store.peers.recordSync(peerKey, peerName, deviceId = null, addresses = emptyList(), versionVector = sent, now = lan.now())
                 _events.tryEmit(Event.DiarySent(peerName))
                 return false
             }

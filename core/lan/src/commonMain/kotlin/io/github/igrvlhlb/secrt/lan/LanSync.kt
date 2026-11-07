@@ -126,8 +126,11 @@ class LanSync(
             when (hello.vaultId) {
                 null -> {
                     progress(LanProgress.SendingDiary)
+                    val sent = store.versionVector()
                     sendDiary(messages)
                     store.peers.pair(peerKey, name, deviceId = null, addresses = addresses, now = now())
+                    // It now holds everything this one had.
+                    store.peers.recordSync(peerKey, name, deviceId = null, addresses = addresses, versionVector = sent, now = now())
                     PairingResult.DiarySent(name)
                 }
                 vaultId -> {
@@ -243,10 +246,15 @@ class LanSync(
      */
     suspend fun completeJoin(credential: Credential) {
         val join = requireNotNull(_pendingJoin.value) { "No diary was received" }
-        session.restore(fileSystem.source(join.file), credential)
-        val store = unlockedStore()
-        store.peers.setIdentitySeed(join.identitySeed)
-        store.peers.pair(join.peerKey, join.peerName, join.peerDeviceId, join.peerAddresses, now())
+        // Inside the restore, before the diary counts as open: the screen that asked for the password
+        // goes away (cancelling its caller) as soon as it is, and the identity the other device paired
+        // with must never be lost. The archive held all of that device's diary: they are in sync.
+        session.restore(fileSystem.source(join.file), credential) { diary ->
+            val peers = diary.store.peers
+            peers.setIdentitySeed(join.identitySeed)
+            peers.pair(join.peerKey, join.peerName, join.peerDeviceId, join.peerAddresses, now())
+            peers.recordSync(join.peerKey, join.peerName, join.peerDeviceId, join.peerAddresses, diary.store.versionVector(), now())
+        }
         discardJoin()
     }
 

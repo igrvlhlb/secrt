@@ -203,10 +203,15 @@ class AppSession(
      * First run only: recreates the diary from a backup, which then opens with the backup's
      * password or recovery key. Nothing is left behind if it fails.
      *
+     * @param finish as for [restoreFrom].
      * @throws InvalidCredentialsException
      * @throws io.github.igrvlhlb.secrt.archive.ArchiveException if the file isn't a usable backup.
      */
-    suspend fun restore(source: Source, credential: Credential) = restoreFrom(credential, load = { restore ->
+    suspend fun restore(
+        source: Source,
+        credential: Credential,
+        finish: suspend (OpenDiary) -> Unit = {},
+    ) = restoreFrom(credential, finish = finish, load = { restore ->
         source.buffer().use { input ->
             SecrtArchive.read(
                 input,
