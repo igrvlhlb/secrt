@@ -15,9 +15,22 @@ class OpenDiary internal constructor(
     val keys: VaultKeys,
     val blobs: BlobStore,
     val crypto: Crypto,
-    /** The installed `vault.key`: key slots only, no secrets in clear. */
-    val vaultKeyJson: String,
-)
+    private val currentVaultKey: () -> String,
+    private val compare: suspend (String) -> KeySlotsComparison = { error("Not available while restoring") },
+    private val adopt: suspend (KeySlotsChange) -> Boolean = { error("Not available while restoring") },
+) {
+    /**
+     * The installed `vault.key` (key slots only, no secrets in clear). Read each time: it changes
+     * when [adoptKeySlots] takes on another device's.
+     */
+    val vaultKeyJson: String get() = currentVaultKey()
+
+    /** [AppSession.compareKeySlots], for use inside [AppSession.withOpenDiary]. */
+    suspend fun compareKeySlots(vaultKeyJson: String): KeySlotsComparison = compare(vaultKeyJson)
+
+    /** [AppSession.adoptKeySlots], for use inside [AppSession.withOpenDiary]. */
+    suspend fun adoptKeySlots(change: KeySlotsChange): Boolean = adopt(change)
+}
 
 /** Handed to the source of an [AppSession.restoreFrom]. */
 class RestoreContext internal constructor(

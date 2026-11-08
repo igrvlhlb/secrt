@@ -231,6 +231,13 @@ class DiaryStore private constructor(
         }
     }
 
+    /**
+     * A timestamp after every revision this replica wrote or received, for a change kept outside
+     * the revision log (a new password): it then orders after everything this device had seen,
+     * even if another device's clock runs ahead of this one's.
+     */
+    suspend fun nextTimestamp(): Hlc = write { clock.now() }
+
     // ---------------------------------------------------------------- per-replica settings
 
     /**

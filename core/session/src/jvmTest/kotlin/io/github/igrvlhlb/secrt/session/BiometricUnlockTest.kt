@@ -9,6 +9,7 @@ import io.github.igrvlhlb.secrt.crypto.SodiumCrypto
 import io.github.igrvlhlb.secrt.storage.DriverFactory
 import io.github.igrvlhlb.secrt.storage.EntryDraft
 import io.github.igrvlhlb.secrt.vault.Credential
+import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
 import io.github.igrvlhlb.secrt.vault.VaultManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -178,5 +179,42 @@ class BiometricUnlockTest {
 
         assertFalse(session.biometricUnlockEnabled.value)
         assertNull(biometrics.stored)
+    }
+
+    @Test
+    fun aPasswordTakenFromAnotherDeviceKeepsTheFingerprintWorking() = runTest {
+        val session = session()
+        session.create("pw", withRecoveryKey = false)
+        session.enableBiometricUnlock()
+        // Another device of the same diary changes the password, and this one takes it on.
+        val laptopDb = File.createTempFile("secrt-bio-laptop", ".db").apply { delete(); deleteOnExit() }
+        val laptop = AppSession(
+            fileSystem = FakeFileSystem(),
+            vaultDirectory = "/vault".toPath(),
+            driverFactory = object : DriverFactory {
+                override fun create(schema: SqlSchema<QueryResult.Value<Unit>>, key: ByteArray): SqlDriver =
+                    JdbcSqliteDriver("jdbc:sqlite:${laptopDb.absolutePath}", schema = schema)
+
+                override fun delete() {
+                    laptopDb.delete()
+                }
+            },
+            cryptoProvider = { SodiumCrypto.create() },
+            ioDispatcher = Dispatchers.Default,
+            argon2Params = Argon2Params.Insecure,
+        )
+        laptop.restore(Buffer().also { session.exportTo(it) }, Credential.Password("pw"))
+        laptop.changePassword("pw", "new password")
+        session.adoptKeySlots(assertIs<KeySlotsComparison.NewerThere>(session.compareKeySlots(laptop.vaultKeyJson())).change)
+        laptop.lock()
+
+        // Same data key: the fingerprint still opens it; the password is the new one.
+        session.lock()
+        session.unlockWithBiometrics()
+        session.unlocked
+        assertTrue(session.biometricUnlockEnabled.value)
+        session.lock()
+        assertFailsWith<InvalidCredentialsException> { session.unlock("pw") }
+        session.unlock("new password")
     }
 }

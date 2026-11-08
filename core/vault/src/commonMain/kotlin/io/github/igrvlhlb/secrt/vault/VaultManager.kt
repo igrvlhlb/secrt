@@ -7,6 +7,7 @@ import io.github.igrvlhlb.secrt.crypto.decodeBase64
 import io.github.igrvlhlb.secrt.crypto.open
 import io.github.igrvlhlb.secrt.crypto.seal
 import io.github.igrvlhlb.secrt.crypto.toBase64
+import io.github.igrvlhlb.secrt.model.Hlc
 import io.github.igrvlhlb.secrt.model.SecrtJson
 import io.github.igrvlhlb.secrt.model.newId
 import okio.FileSystem
@@ -15,6 +16,12 @@ import okio.Path
 class InvalidCredentialsException : Exception("Wrong password or recovery key")
 
 class InvalidVaultHeaderException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * Who changed a vault's key slots (its password or recovery key), and when: [at] is a hybrid
+ * logical clock value whose node is that device's id; [deviceName] is `null` when unknown.
+ */
+data class KeySlotsStamp(val at: Hlc, val deviceName: String?)
 
 /** Something that opens a vault. */
 sealed interface Credential {
@@ -149,25 +156,105 @@ class VaultManager(
         return VaultKeys(header.vaultId, crypto, dataKey.copyOf())
     }
 
-    /** Replaces the password. Data stays encrypted with the same data key. */
-    fun changePassword(keys: VaultKeys, newPassword: String) {
+    /**
+     * Replaces the password. Data stays encrypted with the same data key.
+     *
+     * This and the other key-slot changes are stamped with [stamp] (moved past the previous stamp
+     * if the clock is behind it), so the user's other devices can tell it's the newest change.
+     */
+    fun changePassword(keys: VaultKeys, newPassword: String, stamp: KeySlotsStamp) {
         val header = readHeader()
         val slots = header.slots.filterNot { it is KeySlot.Password } + passwordSlot(header.vaultId, keys.dataKey, newPassword)
-        writeHeader(header.copy(slots = slots))
+        writeChanged(header, keys, slots, stamp)
     }
 
     /** Creates a new recovery key, invalidating any previous one. */
-    fun regenerateRecoveryKey(keys: VaultKeys): String {
+    fun regenerateRecoveryKey(keys: VaultKeys, stamp: KeySlotsStamp): String {
         val header = readHeader()
         val (slot, recoveryKey) = recoverySlot(header.vaultId, keys.dataKey)
-        writeHeader(header.copy(slots = header.slots.filterNot { it is KeySlot.Recovery } + slot))
+        writeChanged(header, keys, header.slots.filterNot { it is KeySlot.Recovery } + slot, stamp)
         return recoveryKey
     }
 
-    fun removeRecoveryKey() {
+    fun removeRecoveryKey(keys: VaultKeys, stamp: KeySlotsStamp) {
         val header = readHeader()
-        writeHeader(header.copy(slots = header.slots.filterNot { it is KeySlot.Recovery }))
+        writeChanged(header, keys, header.slots.filterNot { it is KeySlot.Recovery }, stamp)
     }
+
+    /**
+     * When the key slots of [headerJson] (by default, the installed `vault.key`) last changed, and
+     * on which device; `null` if they were never stamped. The device name needs [keys] of the same
+     * diary, and is `null` without them.
+     *
+     * @throws InvalidVaultHeaderException if [headerJson] isn't a vault header this app can read.
+     */
+    fun keySlotsStamp(keys: VaultKeys, headerJson: String = headerJson()): KeySlotsStamp? {
+        val header = parseHeader(headerJson)
+        val change = header.slotsChanged ?: return null
+        val name = change.deviceName?.let { sealed ->
+            try {
+                crypto.open(keys.archiveKey, sealed.decodeBase64(), deviceNameAad(header.vaultId, change.at)).decodeToString()
+            } catch (e: DecryptionException) {
+                null
+            } catch (e: IllegalArgumentException) {
+                null
+            }
+        }
+        return KeySlotsStamp(change.at, name)
+    }
+
+    /**
+     * Checks that [headerJson], received from another device, is a `vault.key` of the diary [keys]
+     * opens: the same diary id, a key-check value of this very data key, and a password slot. Its
+     * slots themselves can't be checked without the credential, so where it comes from must be
+     * authenticated with this diary's keys (an archive-key seal, the paired LAN channel): this check
+     * catches mix-ups and bugs, not forgeries.
+     *
+     * @throws InvalidVaultHeaderException if it isn't.
+     */
+    fun verifyExternal(headerJson: String, keys: VaultKeys) {
+        val header = parseHeader(headerJson)
+        if (header.vaultId != keys.vaultId) throw InvalidVaultHeaderException("This vault key belongs to another diary")
+        val expected = header.keyCheck?.decodeBase64OrNull() ?: throw InvalidVaultHeaderException("This vault key can't be checked")
+        if (!constantTimeEquals(expected, keyCheck(keys.dataKey).decodeBase64())) {
+            throw InvalidVaultHeaderException("This vault key belongs to another data key")
+        }
+        if (header.slots.none { it is KeySlot.Password }) throw InvalidVaultHeaderException("This vault key has no password")
+    }
+
+    /**
+     * Replaces the installed `vault.key` with [headerJson], newer key slots from another device of
+     * this diary, once [verifyExternal] accepts it. The data key stays the same, so nothing else
+     * changes: the diary stays open, and a key kept for biometric unlock still works.
+     *
+     * @throws InvalidVaultHeaderException
+     */
+    fun adopt(headerJson: String, keys: VaultKeys) {
+        verifyExternal(headerJson, keys)
+        writeHeaderText(headerJson)
+    }
+
+    private fun writeChanged(header: VaultHeader, keys: VaultKeys, slots: List<KeySlot>, stamp: KeySlotsStamp) {
+        require(keys.vaultId == header.vaultId) { "These keys belong to another vault" }
+        // Never at or before the change it replaces, whatever the clocks say.
+        val previous = header.slotsChanged?.at
+        val at = if (previous == null || stamp.at > previous) stamp.at else Hlc(previous.millis, previous.counter + 1, stamp.at.node)
+        val name = stamp.deviceName?.let {
+            crypto.seal(keys.archiveKey, it.encodeToByteArray(), deviceNameAad(header.vaultId, at)).toBase64()
+        }
+        // The keys came from a slot (or were checked against the key-check value), so a missing
+        // key-check value can be filled in, as exportDataKey does: adopting this header needs it.
+        writeHeader(header.copy(slots = slots, keyCheck = header.keyCheck ?: keyCheck(keys.dataKey), slotsChanged = SlotsChange(at, name)))
+    }
+
+    private fun String.decodeBase64OrNull(): ByteArray? = try {
+        decodeBase64()
+    } catch (e: IllegalArgumentException) {
+        null
+    }
+
+    // Bound to the stamp, so a name can't be moved onto another change.
+    private fun deviceNameAad(vaultId: String, at: Hlc) = "secrt-slots-changed:$vaultId:${at.encode()}".encodeToByteArray()
 
     private fun passwordSlot(vaultId: String, dataKey: ByteArray, password: String): KeySlot.Password {
         val salt = crypto.randomBytes(Crypto.SALT_BYTES)

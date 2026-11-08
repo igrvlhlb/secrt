@@ -11,6 +11,7 @@ import io.github.igrvlhlb.secrt.storage.DriverFactory
 import io.github.igrvlhlb.secrt.storage.db.SecrtDatabase
 import io.github.igrvlhlb.secrt.vault.Credential
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
+import io.github.igrvlhlb.secrt.vault.KeySlotsStamp
 import io.github.igrvlhlb.secrt.vault.VaultKeys
 import io.github.igrvlhlb.secrt.vault.VaultManager
 import kotlinx.coroutines.CoroutineDispatcher
@@ -47,6 +48,8 @@ sealed interface SessionState {
  * @param biometrics the platform's [BiometricKeyStore], or `null` where biometric unlock isn't
  *   offered (desktop).
  * @param settingsFile where [settings] are kept: plaintext, readable while locked.
+ * @param deviceName how this device is named on the user's other devices when they are asked to
+ *   take on a password or recovery key changed here.
  */
 class AppSession(
     private val fileSystem: FileSystem,
@@ -57,6 +60,7 @@ class AppSession(
     private val argon2Params: Argon2Params = Argon2Params.Default,
     private val biometrics: BiometricKeyStore? = null,
     settingsFile: Path = vaultDirectory / "settings.json",
+    private val deviceName: () -> String? = { null },
 ) {
     private val lock = Mutex()
     private var keys: VaultKeys? = null
@@ -82,6 +86,19 @@ class AppSession(
 
     /** The open diary's id; `null` while locked. Two devices sync only when they hold the same diary. */
     val vaultId: String? get() = keys?.vaultId
+
+    private val _keySlotsAdopted = MutableStateFlow<KeySlotsChange?>(null)
+
+    /**
+     * The key slots this device last took on from another one ([adoptKeySlots]) while unlocked, so
+     * the UI can tell the user once which password opens the diary from now on; then
+     * [acknowledgeKeySlotsAdopted].
+     */
+    val keySlotsAdopted: StateFlow<KeySlotsChange?> = _keySlotsAdopted.asStateFlow()
+
+    fun acknowledgeKeySlotsAdopted() {
+        _keySlotsAdopted.value = null
+    }
 
     fun biometricAvailability(): BiometricAvailability = biometrics?.availability() ?: BiometricAvailability.Unsupported
 
@@ -163,6 +180,7 @@ class AppSession(
         keys?.close()
         keys = null
         blobs = null
+        _keySlotsAdopted.value = null
         if (_state.value is SessionState.Unlocked) _state.value = SessionState.Locked
     }
 
@@ -176,16 +194,48 @@ class AppSession(
         if (!state.viaRecoveryKey) {
             vault().unlock(requireNotNull(currentPassword) { "Current password required" }).close()
         }
-        vault().changePassword(keys, newPassword)
+        vault().changePassword(keys, newPassword, newKeySlotsStamp(state.store))
         _state.value = state.copy(viaRecoveryKey = false)
     }
 
     suspend fun hasRecoveryKey(): Boolean = io { vault().hasRecoveryKey() }
 
     /** Replaces the recovery key. @return the new key, to show once. */
-    suspend fun regenerateRecoveryKey(): String = io { vault().regenerateRecoveryKey(requireNotNull(keys) { "Diary is locked" }) }
+    suspend fun regenerateRecoveryKey(): String = io {
+        vault().regenerateRecoveryKey(requireNotNull(keys) { "Diary is locked" }, newKeySlotsStamp(unlockedStore()))
+    }
 
-    suspend fun removeRecoveryKey() = io { vault().removeRecoveryKey() }
+    suspend fun removeRecoveryKey() = io { vault().removeRecoveryKey(requireNotNull(keys) { "Diary is locked" }, newKeySlotsStamp(unlockedStore())) }
+
+    /**
+     * This device's `vault.key` (key slots only, no secrets in clear), to hand to the user's other
+     * devices over a channel authenticated with this diary's keys, for [compareKeySlots] there.
+     */
+    suspend fun vaultKeyJson(): String = io {
+        unlockedStore()
+        vault().headerJson()
+    }
+
+    /**
+     * Compares the key slots of [vaultKeyJson], another copy of this diary's `vault.key`, with this
+     * device's: the most recent change wins, on every device. Only trust copies that came
+     * authenticated with this diary's keys (a backup's sealed copy, the paired LAN channel); a
+     * plain one could be an old one put back, or forged.
+     *
+     * @throws io.github.igrvlhlb.secrt.vault.InvalidVaultHeaderException if it isn't this diary's
+     *   (another diary, another data key, unreadable).
+     */
+    suspend fun compareKeySlots(vaultKeyJson: String): KeySlotsComparison = io { compareKeySlotsUnlocked(vaultKeyJson) }
+
+    /**
+     * Takes on [change] (from [compareKeySlots], after the user agreed): this device opens with
+     * those key slots from its next unlock, and stays open meanwhile. Does nothing if they are no
+     * longer newer than this device's (e.g. the password was changed here in the meantime).
+     *
+     * @return whether they were installed; [keySlotsAdopted] then says so.
+     * @throws io.github.igrvlhlb.secrt.vault.InvalidVaultHeaderException
+     */
+    suspend fun adoptKeySlots(change: KeySlotsChange): Boolean = io { adoptKeySlotsUnlocked(change) }
 
     /**
      * Writes an encrypted backup of the whole diary (a `.secrt` file) to [sink], and closes it.
@@ -253,7 +303,7 @@ class AppSession(
             store = DiaryStore.open(driverFactory.create(SecrtDatabase.Schema, newKeys.databaseKey), blobStore, ioDispatcher)
             store.applyRemote(revisions)
             val headerJson = requireNotNull(restore.vaultKeyJson)
-            finish(OpenDiary(store, newKeys, blobStore, crypto, headerJson))
+            finish(OpenDiary(store, newKeys, blobStore, crypto, currentVaultKey = { headerJson }))
             // Installed last: until vault.key exists the app still considers itself "first run".
             vault.install(headerJson)
             keys = newKeys
@@ -274,7 +324,18 @@ class AppSession(
      */
     suspend fun <T> withOpenDiary(block: suspend (OpenDiary) -> T): T = io {
         val store = unlockedStore()
-        block(OpenDiary(store, requireNotNull(keys), requireNotNull(blobs), cryptoProvider(), vault().headerJson()))
+        val vault = vault()
+        // The lock is already held: these must not take it again.
+        val diary = OpenDiary(
+            store,
+            requireNotNull(keys),
+            requireNotNull(blobs),
+            cryptoProvider(),
+            currentVaultKey = vault::headerJson,
+            compare = ::compareKeySlotsUnlocked,
+            adopt = ::adoptKeySlotsUnlocked,
+        )
+        block(diary)
     }
 
     /**
@@ -298,6 +359,43 @@ class AppSession(
     }
 
     private fun unlockedStore(): DiaryStore = (_state.value as? SessionState.Unlocked ?: error("Diary is locked")).store
+
+    /** Stamps a key-slot change made here: after everything this device has seen, named for the others. */
+    private suspend fun newKeySlotsStamp(store: DiaryStore) = KeySlotsStamp(store.nextTimestamp(), deviceName()?.takeIf { it.isNotBlank() })
+
+    // The two below expect the session lock to be held.
+
+    private suspend fun compareKeySlotsUnlocked(theirs: String): KeySlotsComparison {
+        val store = unlockedStore()
+        val keys = requireNotNull(keys)
+        val vault = vault()
+        vault.verifyExternal(theirs, keys)
+        val there = vault.keySlotsStamp(keys, theirs)
+        val here = vault.keySlotsStamp(keys)
+        return when {
+            there != null && there.isNewerThan(here) -> {
+                // A header stamped without a name: the device may still be a paired one.
+                val name = there.deviceName ?: store.peers.all().firstOrNull { it.deviceId == there.at.node }?.name
+                KeySlotsComparison.NewerThere(KeySlotsChange(name, there.at.millis, there.at, theirs))
+            }
+            here.isNewerThan(there) -> KeySlotsComparison.NewerHere
+            else -> KeySlotsComparison.Same
+        }
+    }
+
+    private suspend fun adoptKeySlotsUnlocked(change: KeySlotsChange): Boolean {
+        unlockedStore()
+        val keys = requireNotNull(keys)
+        val vault = vault()
+        // Only ever forward: the user may have changed the password here since it was compared.
+        if (!KeySlotsStamp(change.stamp, null).isNewerThan(vault.keySlotsStamp(keys))) return false
+        vault.adopt(change.vaultKeyJson, keys)
+        _keySlotsAdopted.value = change
+        return true
+    }
+
+    /** Unstamped key slots predate stamps, so they are older than any stamped ones. */
+    private fun KeySlotsStamp?.isNewerThan(other: KeySlotsStamp?): Boolean = this != null && (other == null || at > other.at)
 
     /**
      * Removes everything a vault leaves on disk, including a wrapped key of a previous vault.
