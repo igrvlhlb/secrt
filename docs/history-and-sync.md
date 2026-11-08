@@ -34,6 +34,9 @@ commits. The revisions nobody points at yet are the **heads**:
 - **Several heads:** two devices changed the record without seeing each other's change. The
   record's value is the *merge* of the heads (section 4).
 
+In the diagrams, arrows point forward in time, from a revision to the one written on top of it.
+The stored link goes the other way: each revision lists its parents.
+
 ```mermaid
 flowchart LR
     subgraph normal ["Normal: a straight line, one head"]
