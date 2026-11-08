@@ -14,8 +14,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -43,8 +45,19 @@ fun JoinFromPhoneScreen(lan: LanSync, onCancel: () -> Unit) {
     val host = remember { lan.host(joining = true) }
     val status by host.status.collectAsStateWithLifecycle()
     val invite by host.invite.collectAsStateWithLifecycle()
+    // What the phone that scanned the code is doing: asking its user, or giving up.
+    var note by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(host) {
         launch { host.run() }
+        launch {
+            host.events.collect { event ->
+                when (event) {
+                    is LanHost.Event.WaitingForAnswer -> note = "Confirm on ${event.peerName} to send the diary here."
+                    is LanHost.Event.Failed -> note = event.message
+                    else -> Unit
+                }
+            }
+        }
         host.status.first { it !is LanHost.Status.Starting }
         host.showInvite()
     }
@@ -65,10 +78,14 @@ fun JoinFromPhoneScreen(lan: LanSync, onCancel: () -> Unit) {
                     instructions = "In secrt on your phone, open Settings → Devices → Scan a code, and scan this one. " +
                         "The phone sends its diary, still encrypted; then you type the diary's password here. " +
                         "Both must be on the same Wi-Fi.",
-                    onNewCode = { scope.launch { host.showInvite() } },
+                    onNewCode = {
+                        note = null
+                        scope.launch { host.showInvite() }
+                    },
                     onCancel = null,
                 )
             }
+            note?.let { Text(it, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.primary) }
             TextButton(onClick = onCancel) { Text("Back") }
         }
     }

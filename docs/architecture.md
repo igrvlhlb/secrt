@@ -183,17 +183,19 @@ computers can't pair yet.
   Then, by what each side holds:
   - the same diary (same vault id): they store each other as peers and sync right away;
   - the shower has no diary (a computer on its first screen, "Set up from your phone", which listens
-    the same way): the scanner sends it this one as an encrypted `.secrt` archive (the backup
+    the same way): once the scanner's user confirms (*Send a copy of your encrypted diary to
+    "<name>"?*), it sends this one as an encrypted `.secrt` archive (the backup
     format, staged in a temp file on both sides), and the user types the diary's password or
     recovery key on the computer, which restores it with the backup code path and keeps the phone
     as a peer;
   - different diaries: both refuse, nothing is stored or sent.
 - Setting up a phone from another device (a lost phone while the computer still has the diary, or
   a second phone): "Set up from another device" on the phone's first screen opens the scanner. It
-  scans the code shown by a device that has the diary, which sends it the same `.secrt` archive;
-  the user types the diary's password or recovery key on the new phone, and both keep each other as
-  peers. The shower's user showing the (one-time, 5-minute) code is the consent, as for pairing.
-  If the shower has no diary either, the scanner says so and nothing is sent.
+  scans the code shown by a device that has the diary, which asks its user (*"<name>" wants a copy
+  of your diary. Send it?*) and then sends it the same `.secrt` archive; the user types the diary's
+  password or recovery key on the new phone, and both keep each other as peers. Showing the code
+  isn't consent enough: someone could photograph it and scan it first. If the shower has no diary
+  either, the scanner says so and nothing is sent.
 - Later: "Sync now" next to a peer this device scanned. Both apps open and unlocked, the other one
   showing Devices. "Forget" (either side) unpairs: the other side is then rejected.
 
@@ -227,12 +229,21 @@ Counters make frames impossible to drop, replay or reorder unnoticed; conversati
 explicit messages (`done`, `archiveEnd`), so a cut connection is never taken as complete. Frames are
 at most 24 MiB (one 20 MB attachment); reads time out (15 s handshake, 2 min per frame).
 
-**After the handshake: `hello`** both ways (I first): name, device id, vault id. A `null` vault id
-means "no diary yet, set me up" (defined that way from the start, so no version bump was needed):
-- I has none, R has one (pair mode only): R answers with its hello and sends the archive
-  (`archive`, chunks, `archiveEnd`; I confirms with `received`). Both pair; R learns I's device id
-  at the first sync (restoring gives a new one).
-- I has one, R has none (R is a computer listening for "Set up from your phone"): the other way round.
+**After the handshake: `hello`** both ways (I first): name, device id, vault id, and `protocol`, what
+that app understands (missing, so 1, from versions before it; they ignore the field). A `null`
+vault id means "no diary yet, set me up" (defined that way from the start, so no version bump was
+needed):
+- I has none, R has one (pair mode only): R answers with its hello, asks its user, and sends the
+  archive (`archive`, chunks, `archiveEnd`; I confirms with `received`). Both pair; R learns I's
+  device id at the first sync (restoring gives a new one).
+- I has one, R has none (R is a computer listening for "Set up from your phone"): the other way round
+  (I asks its user after R's hello).
+- **Asking the user** (`LanQuestion`; the connecting side passes a callback, the listening side
+  publishes `LanHost.question`): the other side waits on its read, which times out after 2 minutes,
+  so the question waits 90 s at most and the other side always hears back: `failure(SendDeclined)`
+  for "no", `failure(NoAnswer)` on timeout, `failure(Locked)` if the diary locked meanwhile (the
+  question goes away with it, and with the screen). Peers of protocol 1 can't read the first two
+  and get `failure(Protocol)` instead ("rejected by the other device"). Protocol 2 is what asks.
 - Neither: R refuses with `failure(NoDiary)`. Same vault id: sync. Different: `failure(DifferentDiary)`.
 - A host from before this answers a diary-less hello with `DifferentDiary`; the scanner reports it
   as "update secrt on the other device".
@@ -273,7 +284,7 @@ before there is a diary, on "Set up from another device"; with the app already o
 hook doesn't exist there.
 
 **Not done yet** (see BACKLOG.md): numeric-code pairing with a PAKE, mDNS discovery, the computer
-starting a sync, computer ↔ computer, asking before sending a diary, iOS.
+starting a sync, computer ↔ computer, iOS.
 
 ## Module layout
 ```

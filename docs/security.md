@@ -90,12 +90,20 @@ minutes. Both sides prove they know it during the handshake, so neither can be i
 someone who didn't see the screen. Full details are in
 [architecture.md](architecture.md#lan-pairing--sync-corelan-uidevices).
 
-**A known gap.** When a computer *without* a diary asks to be set up, the phone sends its
-encrypted diary as soon as it scans the code. Someone who tricks the user into scanning their code
-gets the encrypted diary to attack offline (as strong as the password). In the other direction
-("Set up from another device"), the device showing the code sends its diary to whoever scans it
-first, so someone who photographs the code within its 5 minutes could race the user. A
-confirmation prompt is in the backlog.
+**Sending a diary needs a yes.** A device without a diary can be set up from one that has it, which
+sends its whole (encrypted) diary. That copy is as strong as the password, so the sending device
+always asks first, once the other device's name is known, and sends nothing on "no", after 90 s
+without an answer, or if the diary locks meanwhile:
+- the phone scans a code shown by a computer being set up ("Set up from your phone"): *Send a copy of
+  your encrypted diary to "&lt;name&gt;"? Only do this with your own device.* This stops someone who
+  gets the user to scan *their* code from walking away with the diary to attack offline;
+- a new device scans the code this one shows ("Set up from another device"): *"&lt;name&gt;" wants a
+  copy of your diary. Send it?* This stops someone who photographs the code within its 5 minutes
+  and scans it before the user does.
+
+The name is whatever the other device calls itself, so an attacker can pick a familiar one. What
+gives them away is the timing: a question the user didn't expect, or one that shows up while their
+own device is still connecting (the code works once, so their own scan then fails).
 
 ## Changing the password
 

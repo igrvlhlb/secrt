@@ -11,15 +11,22 @@ import io.github.igrvlhlb.secrt.vault.Credential
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.aSocket
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import okio.FileSystem
 import okio.Path
 import okio.buffer
@@ -29,7 +36,35 @@ import kotlin.random.Random
 import kotlin.time.Clock
 
 /** Progress of a pairing or sync started on this device, for the UI. */
-enum class LanProgress { Connecting, SendingDiary, ReceivingDiary, Syncing }
+enum class LanProgress {
+    Connecting,
+    SendingDiary,
+
+    /** The other device asks its user something (e.g. whether to send its diary) before going on. */
+    WaitingForAnswer,
+    ReceivingDiary,
+    Syncing,
+}
+
+/**
+ * Something only the user can decide, asked on this device while the other one waits on the
+ * connection: through the `ask` callback of [LanSync.pair] on the device that connects, through
+ * [LanHost.question] on the one that listens. Not answering in time
+ * ([LanSync.DECISION_TIMEOUT_MILLIS]), or the diary locking, counts as "no".
+ */
+sealed class LanQuestion {
+    /** The other device, as it names itself (so anyone can pick any name). */
+    abstract val peerName: String
+
+    internal val answer = CompletableDeferred<Boolean>()
+
+    /**
+     * Send a copy of this diary (encrypted, as a backup file) to [peerName], which has none?
+     * [peerAsked]: it scanned this device's code to be set up from it; otherwise this device scanned
+     * the code [peerName] showed to be set up.
+     */
+    class SendDiary(override val peerName: String, val peerAsked: Boolean) : LanQuestion()
+}
 
 sealed interface PairingResult {
     val peerName: String
@@ -71,6 +106,7 @@ class PendingJoin internal constructor(
  * @param localAddresses this device's addresses for pairing codes; [localNetworkAddresses] by default.
  * @param listenPort fixed so a paired phone finds the computer again at the address it remembers;
  *   another one is used if it's taken (pairing codes carry the actual port).
+ * @param decisionTimeoutMillis how long a [LanQuestion] waits for the user (tests shorten it).
  */
 class LanSync(
     private val session: AppSession,
@@ -82,6 +118,7 @@ class LanSync(
     internal val localAddresses: () -> List<String> = ::localNetworkAddresses,
     internal val listenPort: Int = DEFAULT_PORT,
     private val connectTimeoutMillis: Long = 4_000,
+    private val decisionTimeoutMillis: Long = DECISION_TIMEOUT_MILLIS,
     internal val now: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     private val clientLock = Mutex()
@@ -101,11 +138,16 @@ class LanSync(
 
     /**
      * Pairs with the device showing the QR code [link], then syncs with it, or sets it up with
-     * this diary if it has none.
+     * this diary if it has none. That last one goes through [ask] first ([LanQuestion.SendDiary]):
+     * anyone can show a code, so scanning one isn't consent enough to hand over the diary.
      *
-     * @throws LanException
+     * @throws LanException ([LanException.Declined] if the user said no to [ask]).
      */
-    suspend fun pair(link: String, progress: (LanProgress) -> Unit = {}): PairingResult = client {
+    suspend fun pair(
+        link: String,
+        ask: suspend (LanQuestion) -> Boolean = { false },
+        progress: (LanProgress) -> Unit = {},
+    ): PairingResult = client {
         val invite = PairingInvite.parse(link)
         val store = unlockedStore()
         val vaultId = session.vaultId ?: throw LanException.Locked()
@@ -118,13 +160,18 @@ class LanSync(
             } finally {
                 crypto.wipe(identity.secretKey)
             }
-            messages.send(Hello(deviceName().clean(), store.deviceId, vaultId))
+            messages.send(Hello(deviceName().clean(), store.deviceId, vaultId, PROTOCOL_VERSION))
             val hello = messages.expect<Hello>()
             val name = hello.deviceName.clean()
+            messages.peerName = name
             val peerKey = invite.identityKey.toKeyString()
             val addresses = (listOf(address) + invite.addresses.map { "$it:${invite.port}" }).distinct()
             when (hello.vaultId) {
                 null -> {
+                    // It waits for the answer, and hears if it's no (a version from before the
+                    // question just waits as it would for the archive).
+                    val answer = decide(LanQuestion.SendDiary(name, peerAsked = false), ask)
+                    if (answer != Answer.Yes) refuse(messages, answer, hello.protocol, Failure.Reason.SendDeclined, "Nothing was sent to $name.")
                     progress(LanProgress.SendingDiary)
                     val sent = store.versionVector()
                     sendDiary(messages)
@@ -150,7 +197,8 @@ class LanSync(
      * pairs with it and receives its diary as an encrypted archive. Nothing is opened yet: the user
      * types the diary's password ([completeJoin]), which also keeps the sender as a paired device.
      *
-     * Showing the code is the other side's consent, as for pairing: it's one-time and short-lived.
+     * Showing the code isn't enough for the other side to send its diary: its user is asked first
+     * ([LanQuestion.SendDiary]), and a "no" ends in [LanException.DeclinedThere].
      *
      * @throws LanException
      */
@@ -169,7 +217,7 @@ class LanSync(
                 } finally {
                     crypto.wipe(identity.secretKey)
                 }
-                messages.send(Hello(deviceName().clean(), deviceId = null, vaultId = null))
+                messages.send(Hello(deviceName().clean(), deviceId = null, vaultId = null, PROTOCOL_VERSION))
                 val hello = try {
                     messages.expect<Hello>()
                 } catch (e: LanException.DifferentDiary) {
@@ -178,8 +226,10 @@ class LanSync(
                 }
                 // A device without a diary refuses with NoDiary instead of saying hello.
                 if (hello.vaultId == null) throw LanException.Protocol("no diary")
-                progress(LanProgress.ReceivingDiary)
-                val file = receiveDiary(messages)
+                messages.peerName = hello.deviceName.clean()
+                // Versions from before the question send right away.
+                progress(if (hello.protocol >= PROTOCOL_VERSION) LanProgress.WaitingForAnswer else LanProgress.ReceivingDiary)
+                val file = receiveDiary(messages) { progress(LanProgress.ReceivingDiary) }
                 messages.send(Received)
                 val addresses = (listOf(address) + invite.addresses.map { "$it:${invite.port}" }).distinct()
                 PendingJoin(file, seed.copyOf(), invite.identityKey.toKeyString(), hello.deviceName.clean(), hello.deviceId, addresses)
@@ -208,12 +258,13 @@ class LanSync(
             } finally {
                 crypto.wipe(identity.secretKey)
             }
-            messages.send(Hello(deviceName().clean(), store.deviceId, vaultId))
+            messages.send(Hello(deviceName().clean(), store.deviceId, vaultId, PROTOCOL_VERSION))
             val hello = try {
                 messages.expect<Hello>()
             } catch (e: LanException.UnknownDevice) {
                 throw LanException.UnknownDevice(peer.name)
             }
+            messages.peerName = hello.deviceName.clean()
             if (hello.vaultId != vaultId) throw LanException.DifferentDiary()
             progress(LanProgress.Syncing)
             val stats = SyncExchange.run(messages, store, initiator = true)
@@ -294,9 +345,10 @@ class LanSync(
         _pendingJoin.value = join
     }
 
-    /** Receives the diary archive another device sends to set this one up. */
-    internal suspend fun receiveDiary(messages: MessageChannel): Path {
+    /** Receives the diary archive another device sends to set this one up; [onStart] once it starts coming. */
+    internal suspend fun receiveDiary(messages: MessageChannel, onStart: () -> Unit = {}): Path {
         val start = messages.expect<ArchiveStart>()
+        onStart()
         if (start.size !in 1..MAX_ARCHIVE_BYTES) throw LanException.Protocol("archive size")
         // A diary still waiting for its password gives way to the new one, which reuses its file.
         discardJoin()
@@ -314,7 +366,7 @@ class LanSync(
                         }
                         is Incoming.Message -> when (val message = incoming.message) {
                             ArchiveEnd -> break
-                            is Failure -> throw message.toException()
+                            is Failure -> throw message.toException(messages.peerName)
                             else -> throw LanException.Protocol("unexpected message")
                         }
                         is Incoming.Attachment -> throw LanException.Protocol("unexpected data")
@@ -355,6 +407,46 @@ class LanSync(
         } finally {
             fileSystem.delete(file, mustExist = false)
         }
+    }
+
+    internal enum class Answer { Yes, No, NoAnswer, Locked }
+
+    /**
+     * Asks the user [question] while the other device waits on the connection. Its reads time out
+     * after [SecureChannel.RECEIVE_TIMEOUT_MILLIS], so the answer is awaited for less than that: it
+     * always hears back (a "no answer" at worst) instead of seeing the connection drop. A diary that
+     * locks meanwhile takes the question with it.
+     */
+    internal suspend fun decide(question: LanQuestion, ask: suspend (LanQuestion) -> Boolean): Answer =
+        withTimeoutOrNull(decisionTimeoutMillis) {
+            coroutineScope {
+                val locked = async {
+                    session.state.first { it !is SessionState.Unlocked }
+                    Answer.Locked
+                }
+                val answered = async { if (ask(question)) Answer.Yes else Answer.No }
+                select {
+                    locked.onAwait { it }
+                    answered.onAwait { it }
+                }.also { coroutineContext.cancelChildren() }
+            }
+        } ?: Answer.NoAnswer
+
+    /**
+     * Tells the other side that nothing follows because of [answer] ([declined] if the user said
+     * no), in terms its [protocol] understands, then throws for this side.
+     */
+    internal suspend fun refuse(messages: MessageChannel, answer: Answer, protocol: Int, declined: Failure.Reason, declinedHere: String): Nothing {
+        val reason = when (answer) {
+            Answer.Yes -> error("Nothing to refuse")
+            Answer.No -> declined
+            Answer.NoAnswer -> Failure.Reason.NoAnswer
+            Answer.Locked -> Failure.Reason.Locked
+        }
+        // Versions from before the question can't read its reasons; this is the closest they know.
+        val understood = reason == Failure.Reason.Locked || protocol >= PROTOCOL_VERSION
+        messages.send(Failure(if (understood) reason else Failure.Reason.Protocol))
+        throw if (answer == Answer.Locked) LanException.Locked() else LanException.Declined(declinedHere)
     }
 
     private suspend fun <T> client(block: suspend () -> T): T = clientLock.withLock {
@@ -399,6 +491,15 @@ class LanSync(
 
     companion object {
         const val DEFAULT_PORT = 47820
+
+        /**
+         * What this side of the conversation understands, sent in [Hello.protocol]: 2 asks the
+         * user before sending a diary.
+         */
+        internal const val PROTOCOL_VERSION = 2
+
+        /** How long a question waits for the user: well under the other side's read timeout. */
+        const val DECISION_TIMEOUT_MILLIS = 90_000L
         private const val OTHER_DEVICE = "the other device"
         internal const val IDENTITY_SEED_BYTES = 32
         private const val CHUNK_BYTES = 1024 * 1024

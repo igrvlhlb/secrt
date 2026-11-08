@@ -24,7 +24,7 @@ import kotlinx.coroutines.withContext
  *
  * Connections are served one at a time. Pairing needs a code shown with [showInvite]: a fresh
  * one-time secret, valid for [INVITE_VALIDITY_MILLIS] and consumed by the first device that proves
- * it.
+ * it. If that device has no diary, it only gets this one once the user agrees ([question]).
  */
 class LanHost internal constructor(private val lan: LanSync, val joining: Boolean) {
 
@@ -50,6 +50,9 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
         /** A device without a diary scanned this one's code and received this diary. */
         data class DiarySent(val peerName: String) : Event
 
+        /** The connected device asks its user something (e.g. whether to send its diary here) before going on. */
+        data class WaitingForAnswer(val peerName: String) : Event
+
         data class Failed(val message: String) : Event
     }
 
@@ -61,6 +64,19 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
 
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 16)
     val events: SharedFlow<Event> = _events.asSharedFlow()
+
+    private val _question = MutableStateFlow<LanQuestion?>(null)
+
+    /**
+     * A question for the user while a connected device waits; answer it with [answer]. It goes away
+     * once answered, after [LanSync.DECISION_TIMEOUT_MILLIS], or when the connection ends (e.g.
+     * [run] is cancelled because the screen closed, or the diary locked).
+     */
+    val question: StateFlow<LanQuestion?> = _question.asStateFlow()
+
+    fun answer(question: LanQuestion, accept: Boolean) {
+        question.answer.complete(accept)
+    }
 
     private class Secret(val bytes: ByteArray, val expiresAt: Long)
 
@@ -146,6 +162,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
             val messages = MessageChannel(channel)
             val hello = messages.expect<Hello>()
             peerName = hello.deviceName.clean()
+            messages.peerName = peerName
             val peerKey = requireNotNull(channel.peerIdentityKey).toKeyString()
 
             if (joining) {
@@ -154,7 +171,9 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
                     _events.tryEmit(Event.Failed("$peerName has no diary either: there's nothing to set this computer up from."))
                     return false
                 }
-                messages.send(Hello(lan.ownName(), deviceId = null, vaultId = null))
+                messages.send(Hello(lan.ownName(), deviceId = null, vaultId = null, LanSync.PROTOCOL_VERSION))
+                // Its user is asked before it sends anything (versions from before that just send).
+                if (hello.protocol >= LanSync.PROTOCOL_VERSION) _events.tryEmit(Event.WaitingForAnswer(peerName))
                 val file = lan.receiveDiary(messages)
                 messages.send(Received)
                 lan.offerJoin(PendingJoin(file, requireNotNull(joinIdentitySeed).copyOf(), peerKey, peerName, hello.deviceId, peerAddresses = emptyList()))
@@ -169,12 +188,18 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
                 return false
             }
             if (hello.vaultId == null) {
-                // A new device that scanned this one's code: showing the code was the consent to set it up.
+                // A new device that scanned this one's code. Showing the code isn't consent enough:
+                // someone could have photographed it and scanned it first. So the user says who gets
+                // the diary, once the other device's name is known.
                 if (mode != ConnectionMode.Pair) {
                     messages.send(Failure(Failure.Reason.Protocol))
                     return false
                 }
-                messages.send(Hello(lan.ownName(), store.deviceId, vaultId))
+                messages.send(Hello(lan.ownName(), store.deviceId, vaultId, LanSync.PROTOCOL_VERSION))
+                val answer = lan.decide(LanQuestion.SendDiary(peerName, peerAsked = true), ::ask)
+                if (answer != LanSync.Answer.Yes) {
+                    lan.refuse(messages, answer, hello.protocol, Failure.Reason.SendDeclined, "Nothing was sent to $peerName.")
+                }
                 val sent = store.versionVector()
                 lan.sendDiary(messages)
                 // Its device id comes with the first sync: restoring gives it a new one.
@@ -189,7 +214,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
                 _events.tryEmit(Event.Failed("$peerName holds a different diary, so it can't sync with this one."))
                 return false
             }
-            messages.send(Hello(lan.ownName(), store.deviceId, vaultId))
+            messages.send(Hello(lan.ownName(), store.deviceId, vaultId, LanSync.PROTOCOL_VERSION))
             if (mode == ConnectionMode.Pair) {
                 store.peers.pair(peerKey, peerName, hello.deviceId, emptyList(), lan.now())
                 _events.tryEmit(Event.Paired(peerName))
@@ -211,6 +236,16 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
             connection.close()
         }
         return false
+    }
+
+    /** Shows [question] on [LanHost.question] until it's answered, or the waiting is cancelled. */
+    private suspend fun ask(question: LanQuestion): Boolean {
+        _question.value = question
+        try {
+            return question.answer.await()
+        } finally {
+            _question.compareAndSet(question, null)
+        }
     }
 
     /** This device's identity: the diary's, or the provisional one of a computer being set up. */

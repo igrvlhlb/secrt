@@ -15,7 +15,9 @@ import io.github.igrvlhlb.secrt.vault.Credential
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -33,6 +35,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -45,7 +48,7 @@ import kotlin.test.assertTrue
  */
 class LanSyncTest {
 
-    private class Device(val name: String) {
+    private class Device(val name: String, decisionTimeoutMillis: Long = LanSync.DECISION_TIMEOUT_MILLIS) {
         val fileSystem = FakeFileSystem()
         val dbFile: File = File.createTempFile("secrt-lan", ".db").apply { delete(); deleteOnExit() }
         var clock = 1_800_000_000_000L
@@ -80,6 +83,7 @@ class LanSyncTest {
             // Fixed per device, like the real default port: a phone finds the computer again at the port it paired with.
             listenPort = ServerSocket(0).use { it.localPort },
             connectTimeoutMillis = 2_000,
+            decisionTimeoutMillis = decisionTimeoutMillis,
             now = { clock },
         )
 
@@ -91,7 +95,8 @@ class LanSyncTest {
     private val phone = device("Phone")
     private val computer = device("Computer")
 
-    private fun device(name: String) = Device(name).also { devices += it }
+    private fun device(name: String, decisionTimeoutMillis: Long = LanSync.DECISION_TIMEOUT_MILLIS) =
+        Device(name, decisionTimeoutMillis).also { devices += it }
 
     @AfterTest
     fun tearDown() = runBlocking {
@@ -104,10 +109,25 @@ class LanSyncTest {
 
     private suspend fun DiaryStore.titles() = observeEntries().first().map { it.title }.toSet()
 
-    /** Starts listening on the computer and returns it once it's ready. */
-    private suspend fun Device.listen(joining: Boolean = false): LanHost {
+    /**
+     * Starts listening on the computer and returns it once it's ready. Its user answers every
+     * question with [answer] (and records it in [asked]); `null` leaves them unanswered.
+     */
+    private suspend fun Device.listen(
+        joining: Boolean = false,
+        answer: Boolean? = true,
+        asked: MutableList<LanQuestion> = mutableListOf(),
+    ): LanHost {
         val host = lan.host(joining)
         scope.launch { host.run() }
+        if (answer != null) {
+            scope.launch {
+                host.question.filterNotNull().collect {
+                    asked += it
+                    host.answer(it, answer)
+                }
+            }
+        }
         host.status.first { it is LanHost.Status.Listening }
         return host
     }
@@ -179,9 +199,16 @@ class LanSyncTest {
 
         val host = computer.listen(joining = true)
         val received = scope.launch { host.events.first { it is LanHost.Event.DiaryReceived } }
-        val result = phone.lan.pair(host.newCode())
+        val waiting = scope.launch { host.events.first { it == LanHost.Event.WaitingForAnswer("Phone") } }
+        val asked = mutableListOf<LanQuestion>()
+        val result = phone.lan.pair(host.newCode(), ask = { asked += it; true })
         assertIs<PairingResult.DiarySent>(result)
         received.join()
+        waiting.join()
+        // The phone's user was asked, naming the computer, before anything was sent.
+        val question = assertIs<LanQuestion.SendDiary>(asked.single())
+        assertEquals("Computer", question.peerName)
+        assertFalse(question.peerAsked)
         val join = assertNotNull(computer.lan.pendingJoin.value)
         assertEquals("Phone", join.peerName)
         // Received data waits for the password; the staged copy is encrypted like a backup file.
@@ -212,14 +239,20 @@ class LanSyncTest {
         val photo = computer.store.addAttachment("pixels".encodeToByteArray(), "photo.png", "image/png")
         computer.store.saveEntry("e1", draft("Day one", attachments = listOf(photo)))
         computer.store.saveEntry("e2", draft("Day two"))
-        val host = computer.listen()
+        val asked = mutableListOf<LanQuestion>()
+        val host = computer.listen(asked = asked)
         val newPhone = device("New phone")
 
         val sent = scope.launch { host.events.first { it is LanHost.Event.DiarySent } }
         val steps = mutableListOf<LanProgress>()
         val join = newPhone.lan.join(host.newCode()) { steps += it }
         sent.join()
-        assertEquals(listOf(LanProgress.Connecting, LanProgress.ReceivingDiary), steps)
+        assertEquals(listOf(LanProgress.Connecting, LanProgress.WaitingForAnswer, LanProgress.ReceivingDiary), steps)
+        // Showing the code wasn't enough: the computer's user said yes to this device by name.
+        val question = assertIs<LanQuestion.SendDiary>(asked.single())
+        assertEquals("New phone", question.peerName)
+        assertTrue(question.peerAsked)
+        assertNull(host.question.value)
         assertEquals("Computer", join.peerName)
         assertEquals(join, newPhone.lan.pendingJoin.value)
         // Nothing opens without the password; the code is used up.
@@ -336,6 +369,71 @@ class LanSyncTest {
         assertNull(newPhone.lan.pendingJoin.value)
         assertNull(computer.lan.pendingJoin.value)
         assertEquals(SessionState.NoVault, computer.session.state.value)
+    }
+
+    @Test
+    fun aDiaryIsNotSentWhenThePhoneSaysNo() = test {
+        // A code shown by someone else's computer: the phone's user turns it down.
+        phone.session.create("pw", withRecoveryKey = false)
+        phone.store.saveEntry("e1", draft("Private"))
+        val host = computer.listen(joining = true)
+        val failure = scope.async { host.events.first { it is LanHost.Event.Failed } }
+
+        val error = assertFailsWith<LanException.Declined> { phone.lan.pair(host.newCode(), ask = { false }) }
+        assertEquals("Nothing was sent to Computer.", error.message)
+        assertEquals(LanHost.Event.Failed("Phone declined to send its diary."), failure.await())
+        assertNull(computer.lan.pendingJoin.value)
+        assertEquals(SessionState.NoVault, computer.session.state.value)
+        assertEquals(emptyList(), phone.store.peers.all())
+    }
+
+    @Test
+    fun aDiaryIsNotSentWhenTheDeviceShowingTheCodeSaysNo() = test {
+        // Someone photographed the code and scanned it first: the computer's user sees who asks, and says no.
+        computer.session.create("pw", withRecoveryKey = false)
+        computer.store.saveEntry("e1", draft("Private"))
+        val host = computer.listen(answer = false)
+        val failure = scope.async { host.events.first { it is LanHost.Event.Failed } }
+        val stranger = device("Stranger")
+
+        val error = assertFailsWith<LanException.DeclinedThere> { stranger.lan.join(host.newCode()) }
+        assertEquals("Computer declined to send its diary.", error.message)
+        assertEquals(LanHost.Event.Failed("Nothing was sent to Stranger."), failure.await())
+        assertNull(stranger.lan.pendingJoin.value)
+        assertEquals(SessionState.NoVault, stranger.session.state.value)
+        assertEquals(emptyList(), computer.store.peers.all())
+        assertNull(host.question.value)
+    }
+
+    @Test
+    fun aQuestionNobodyAnswersEndsCleanly() = test {
+        val slowComputer = device("Slow computer", decisionTimeoutMillis = 500)
+        slowComputer.session.create("pw", withRecoveryKey = false)
+        val host = slowComputer.listen(answer = null)
+        val newPhone = device("New phone")
+
+        val asked = scope.async { host.question.filterNotNull().first() }
+        val error = assertFailsWith<LanException.DeclinedThere> { newPhone.lan.join(host.newCode()) }
+        assertEquals("Nobody answered on Slow computer in time. Try again.", error.message)
+        assertEquals("New phone", asked.await().peerName)
+        // The question went away with the connection.
+        assertNull(host.question.value)
+        assertNull(newPhone.lan.pendingJoin.value)
+    }
+
+    @Test
+    fun lockingTheDiaryTakesTheQuestionAway() = test {
+        computer.session.create("pw", withRecoveryKey = false)
+        val host = computer.listen(answer = null)
+        val newPhone = device("New phone")
+        scope.launch {
+            host.question.filterNotNull().first()
+            computer.session.lock()
+        }
+
+        assertFailsWith<LanException.Locked> { newPhone.lan.join(host.newCode()) }
+        assertNull(host.question.value)
+        assertNull(newPhone.lan.pendingJoin.value)
     }
 
     @Test

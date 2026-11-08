@@ -128,7 +128,11 @@ fun DevicesScreen(lan: LanSync, store: DiaryStore, onBack: () -> Unit) {
         }
     }
 
-    vm.progress?.let { label ->
+    // From a pairing started here, or from a device connecting to this one; one at a time either way.
+    val hostQuestion by vm.host.question.collectAsStateWithLifecycle()
+    vm.question?.let { question -> LanQuestionDialog(question, vm::answer) }
+        ?: hostQuestion?.let { question -> LanQuestionDialog(question) { vm.host.answer(question, it) } }
+    vm.progress?.takeIf { vm.question == null }?.let { label ->
         AlertDialog(
             onDismissRequest = {},
             text = {
@@ -208,7 +212,7 @@ private fun SyncSection(host: LanHost, canScan: Boolean, onShowCode: () -> Unit,
                     invite = invite,
                     instructions = "In secrt on your phone, open Settings → Devices → Scan a code, and scan this one. A new " +
                         "phone can scan it from \"Set up from another device\" on its first screen to receive this diary, " +
-                        "still encrypted.",
+                        "still encrypted, once you confirm here.",
                     onNewCode = onShowCode,
                     onCancel = { codeShown = false; onHideCode() },
                 )

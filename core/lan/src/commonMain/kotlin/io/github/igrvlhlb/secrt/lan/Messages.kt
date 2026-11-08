@@ -19,13 +19,27 @@ internal data class Hello(
     val deviceId: String?,
     /** `null` when this side has no diary yet and wants to be set up from the other one. */
     val vaultId: String?,
+    /**
+     * What this side's app understands, so either side can treat an older one cleanly. Versions
+     * before it didn't send it (they read as 1, and ignore it): 2 asks before sending a diary and
+     * answers [Failure.Reason.SendDeclined] and [Failure.Reason.NoAnswer].
+     */
+    val protocol: Int = 1,
 ) : LanMessage
 
 @Serializable
 @SerialName("failure")
 internal data class Failure(val reason: Reason) : LanMessage {
     @Serializable
-    enum class Reason { WrongCode, UnknownDevice, DifferentDiary, NoDiary, Locked, Busy, Protocol }
+    enum class Reason {
+        WrongCode, UnknownDevice, DifferentDiary, NoDiary, Locked, Busy, Protocol,
+
+        /** The user turned down sending this diary. Only sent to peers of [Hello.protocol] 2 and later. */
+        SendDeclined,
+
+        /** Nobody answered the question in time. Only sent to peers of [Hello.protocol] 2 and later. */
+        NoAnswer,
+    }
 }
 
 @Serializable
@@ -86,6 +100,9 @@ internal sealed interface Incoming {
  */
 internal class MessageChannel(val channel: SecureChannel) {
 
+    /** How failures from the other side name it; set once its hello arrived. */
+    var peerName: String = "The other device"
+
     suspend fun send(message: LanMessage) =
         channel.send(byteArrayOf(TYPE_MESSAGE) + json.encodeToString(LanMessage.serializer(), message).encodeToByteArray())
 
@@ -126,7 +143,7 @@ internal class MessageChannel(val channel: SecureChannel) {
     suspend fun receiveMessage(): LanMessage {
         val incoming = receive()
         val message = (incoming as? Incoming.Message)?.message ?: throw LanException.Protocol("unexpected data")
-        if (message is Failure) throw message.toException()
+        if (message is Failure) throw message.toException(peerName)
         return message
     }
 
@@ -153,4 +170,6 @@ internal fun Failure.toException(peerName: String = "The other device"): LanExce
     Failure.Reason.Locked -> LanException.Locked()
     Failure.Reason.Busy -> LanException.Busy()
     Failure.Reason.Protocol -> LanException.Protocol("rejected by the other device")
+    Failure.Reason.SendDeclined -> LanException.DeclinedThere("$peerName declined to send its diary.")
+    Failure.Reason.NoAnswer -> LanException.DeclinedThere("Nobody answered on $peerName in time. Try again.")
 }
