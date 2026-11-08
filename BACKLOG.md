@@ -24,6 +24,13 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] Start a sync from the device that showed the code, e.g. the computer (today only the one that
       scanned connects; the other listens on its Devices screen). Two phones can scan each other's code
 - [ ] Sync on its own while both apps are open (today: "Sync now")
+- [ ] Accept syncs from paired devices on any screen while unlocked and in the foreground (today the
+      receiving side must have its Devices screen open; the requester still starts from Devices).
+      Settings switch, on by default. Trade-offs: any device on the Wi-Fi can probe the port and tell
+      secrt is running (worse on public networks), and the pre-authentication code is exposed for
+      longer. **Prerequisite:** the editor must save against the revision it opened (today `commit`
+      uses the heads at save time), or a change synced in while editing the same entry is overwritten
+- [ ] Live session between connected paired devices (changes flow while connected; idea, not designed)
 - [x] Phone ↔ phone pairing and sync: phones show codes too (one shows, the other scans)
 - [ ] Computer ↔ computer pairing: neither can scan, so it needs a code typed or pasted (e.g. the PAKE one)
 - [ ] Android: when `targetSdk` moves to 37, declare and request `ACCESS_LOCAL_NETWORK` before LAN use
