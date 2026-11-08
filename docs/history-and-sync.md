@@ -127,6 +127,9 @@ sequenceDiagram
     P->>C: TCP connect + handshake (mutual authentication, fresh session keys)
     P->>C: hello (name, device id, diary id)
     C->>P: hello (must be the same diary id)
+    P->>C: my vault.key (key slots)
+    C->>P: my vault.key
+    Note over P,C: the side with the older password asks its user;<br/>"no" ends the sync here
     P->>C: my version vector
     C->>P: my version vector
     P->>C: revisions you lack (in batches)
@@ -138,6 +141,11 @@ sequenceDiagram
     P->>C: done
     C->>P: done
 ```
+
+The password isn't part of the history, but the devices still agree on it before anything else:
+each sends its `vault.key`, and the one whose password (or recovery key) changed less recently is
+asked whether to take on the other's. Declining cancels the whole sync (see
+[security.md](security.md#changing-the-password)).
 
 Attachments are stored before the revisions that reference them. If the connection drops halfway,
 the device never ends up with an entry pointing at an attachment that no later sync would send.
@@ -151,7 +159,8 @@ The backup is just another replica, except that nobody runs code on it. Each dev
 ```
 secrt/<diaryId>/
   manifest.json
-  vault.key
+  vault.key                ← key slots, for restoring on a new device
+  vault.key.sealed         ← the same, sealed with the diary's key: the copy devices trust
   log/<deviceId>-1.seg     ← one segment per push, numbered, never rewritten
   log/<deviceId>-2.seg
   log/<otherDevice>-1.seg
@@ -163,6 +172,9 @@ secrt/<diaryId>/
 - **Pull** downloads the segments this device hasn't read yet and applies them with
   `applyRemote`.
 - **Sync** pulls, then pushes.
+- `vault.key` is the one file several devices write: the device with the most recent password
+  change uploads it, and the others are asked to take it on when they pull (see
+  [security.md](security.md#changing-the-password)).
 
 What this device knows about the backup (which segments it read, what it holds) is kept in its
 own encrypted database, never on the server.

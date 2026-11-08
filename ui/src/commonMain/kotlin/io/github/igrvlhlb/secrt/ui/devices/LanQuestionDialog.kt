@@ -5,6 +5,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import io.github.igrvlhlb.secrt.lan.LanQuestion
+import io.github.igrvlhlb.secrt.ui.components.AdoptKeySlotsDialog
 
 /**
  * Asks the user what a pairing or sync needs to know, while the other device waits. Dismissing it
@@ -12,30 +13,27 @@ import io.github.igrvlhlb.secrt.lan.LanQuestion
  */
 @Composable
 internal fun LanQuestionDialog(question: LanQuestion, onAnswer: (Boolean) -> Unit) {
-    val (title, text, yes, no) = when (question) {
-        is LanQuestion.SendDiary if question.peerAsked -> Wording(
-            "Send your diary?",
-            "\"${question.peerName}\" wants a copy of your diary. Send it?\n\nIt goes encrypted, and opens there " +
-                "only with this diary's password or recovery key. Only say yes if it's your own device, " +
-                "the one that just scanned this code.",
-            "Send",
-            "Don't send",
-        )
-        is LanQuestion.SendDiary -> Wording(
-            "Send your diary?",
-            "Send a copy of your encrypted diary to \"${question.peerName}\"? Only do this with your own device.\n\n" +
-                "It opens there only with this diary's password or recovery key.",
-            "Send",
-            "Don't send",
-        )
+    when (question) {
+        is LanQuestion.SendDiary -> SendDiaryDialog(question, onAnswer)
+        is LanQuestion.AdoptKeySlots -> AdoptKeySlotsDialog(question.change, via = "\"${question.peerName}\"", onAnswer)
+    }
+}
+
+@Composable
+private fun SendDiaryDialog(question: LanQuestion.SendDiary, onAnswer: (Boolean) -> Unit) {
+    val text = if (question.peerAsked) {
+        "\"${question.peerName}\" wants a copy of your diary. Send it?\n\nIt goes encrypted, and opens there " +
+            "only with this diary's password or recovery key. Only say yes if it's your own device, " +
+            "the one that just scanned this code."
+    } else {
+        "Send a copy of your encrypted diary to \"${question.peerName}\"? Only do this with your own device.\n\n" +
+            "It opens there only with this diary's password or recovery key."
     }
     AlertDialog(
         onDismissRequest = { onAnswer(false) },
-        title = { Text(title) },
+        title = { Text("Send your diary?") },
         text = { Text(text) },
-        confirmButton = { TextButton(onClick = { onAnswer(true) }) { Text(yes) } },
-        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text(no) } },
+        confirmButton = { TextButton(onClick = { onAnswer(true) }) { Text("Send") } },
+        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text("Don't send") } },
     )
 }
-
-private data class Wording(val title: String, val text: String, val yes: String, val no: String)

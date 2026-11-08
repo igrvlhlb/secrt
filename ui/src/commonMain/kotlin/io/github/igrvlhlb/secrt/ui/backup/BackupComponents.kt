@@ -43,11 +43,8 @@ import androidx.compose.ui.window.DialogProperties
 import io.github.igrvlhlb.secrt.backup.BackupProgress
 import io.github.igrvlhlb.secrt.backup.BackupResult
 import io.github.igrvlhlb.secrt.ui.auth.PasswordField
-import io.github.igrvlhlb.secrt.ui.components.longFormat
+import io.github.igrvlhlb.secrt.ui.components.formatDateTime
 import io.github.igrvlhlb.secrt.ui.components.readableWidth
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
-import kotlin.time.Instant
 
 /**
  * A screen over the current one. The backup screens are dialogs rather than navigation routes so
@@ -181,10 +178,7 @@ internal fun BackupResult.summary(): String {
 
 private fun changes(n: Int, noun: String = "change") = if (n == 1) "1 $noun" else "$n ${noun}s"
 
-internal fun formatTime(epochMillis: Long): String {
-    val time = Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(TimeZone.currentSystemDefault())
-    return "${time.date.longFormat()}, ${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}"
-}
+internal fun formatTime(epochMillis: Long): String = formatDateTime(epochMillis)
 
 @Composable
 internal fun LabeledValue(label: String, value: String) {

@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.igrvlhlb.secrt.lan.LanHost
 import io.github.igrvlhlb.secrt.lan.LanSync
+import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.storage.Peer
 import io.github.igrvlhlb.secrt.ui.components.ConfirmDialog
@@ -68,8 +69,8 @@ import kotlin.time.Instant
  * devices' codes are scanned and syncs started.
  */
 @Composable
-fun DevicesScreen(lan: LanSync, store: DiaryStore, onBack: () -> Unit) {
-    val vm = viewModel { DevicesViewModel(lan, store, canScanCodes) }
+fun DevicesScreen(lan: LanSync, session: AppSession, store: DiaryStore, onBack: () -> Unit) {
+    val vm = viewModel { DevicesViewModel(lan, session, store, canScanCodes) }
     val peers by vm.peers.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var scanning by remember { mutableStateOf(false) }

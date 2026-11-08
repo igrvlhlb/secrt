@@ -19,6 +19,12 @@ fun LocalDate.monthYear(): String = "${month.name.titleCase()} $year"
 
 fun LocalDate.longFormat(): String = "${weekdayShort()}, $day ${month.name.titleCase().take(3)} $year"
 
+/** E.g. "Sun, 8 Nov 2026, 10:05", in this device's time zone. */
+fun formatDateTime(epochMillis: Long): String {
+    val time = Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(TimeZone.currentSystemDefault())
+    return "${time.date.longFormat()}, ${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}"
+}
+
 /** Material date pickers work in UTC milliseconds. */
 fun LocalDate.toPickerMillis(): Long = atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
 

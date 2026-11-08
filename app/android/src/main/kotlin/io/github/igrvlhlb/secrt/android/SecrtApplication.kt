@@ -30,6 +30,7 @@ class SecrtApplication : Application() {
             cryptoProvider = { SodiumCrypto.create() },
             ioDispatcher = Dispatchers.IO,
             biometrics = biometrics,
+            deviceName = ::deviceName,
         )
     }
 
@@ -49,7 +50,7 @@ class SecrtApplication : Application() {
         )
     }
 
-    /** The name the user gave the phone (e.g. "Galaxy S20"), else its model. */
+    /** The name the user gave the phone (e.g. "Galaxy S20"), else its model. Shown on the user's other devices. */
     private fun deviceName(): String =
         Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() } ?: Build.MODEL
 

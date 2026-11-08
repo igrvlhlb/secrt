@@ -32,10 +32,15 @@ import io.github.igrvlhlb.secrt.backup.BackupResult
 import io.github.igrvlhlb.secrt.backup.BackupTarget
 import io.github.igrvlhlb.secrt.backup.BackupTargetConfig
 import io.github.igrvlhlb.secrt.backup.CloudBackup
+import io.github.igrvlhlb.secrt.backup.KeySlotsChangeDeclinedException
 import io.github.igrvlhlb.secrt.backup.webdav.WebDavTarget
 import io.github.igrvlhlb.secrt.session.AppSession
+import io.github.igrvlhlb.secrt.session.KeySlotsChange
+import io.github.igrvlhlb.secrt.ui.components.AdoptKeySlotsDialog
 import io.github.igrvlhlb.secrt.ui.components.ConfirmDialog
+import io.github.igrvlhlb.secrt.ui.components.adoptedMessage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -68,6 +73,8 @@ fun CloudBackupRow(session: AppSession) {
         modifier = Modifier.clickable { open = true },
     )
     if (open) CloudBackupScreen(vm, onClose = { open = false })
+    // Here rather than on the screen: a sync goes on (and may ask) after the screen is closed.
+    state.keySlotsQuestion?.let { change -> AdoptKeySlotsDialog(change, via = "your cloud backup", onAnswer = vm::answerKeySlots) }
 }
 
 @Composable
@@ -141,7 +148,7 @@ private fun CloudBackupScreen(vm: CloudBackupViewModel, onClose: () -> Unit) {
     }
 }
 
-internal class CloudBackupViewModel(session: AppSession) : ViewModel() {
+internal class CloudBackupViewModel(private val session: AppSession) : ViewModel() {
 
     data class State(
         val loading: Boolean = true,
@@ -153,7 +160,11 @@ internal class CloudBackupViewModel(session: AppSession) : ViewModel() {
         val formError: String? = null,
         val message: String? = null,
         val messageIsError: Boolean = false,
+        /** A sync waits for the user: take on the backup's newer password? See [answerKeySlots]. */
+        val keySlotsQuestion: KeySlotsChange? = null,
     )
+
+    private var keySlotsAnswer: CompletableDeferred<Boolean>? = null
 
     private val backup = CloudBackup(session)
     private val _state = MutableStateFlow(State())
@@ -195,7 +206,23 @@ internal class CloudBackupViewModel(session: AppSession) : ViewModel() {
 
     fun backUp() = run { target -> backup.push(target, ::onProgress) }
 
-    fun sync() = run { target -> backup.sync(target, ::onProgress) }
+    fun sync() = run { target -> backup.sync(target, ::onProgress, ::confirmKeySlots) }
+
+    fun answerKeySlots(accept: Boolean) {
+        keySlotsAnswer?.complete(accept)
+    }
+
+    private suspend fun confirmKeySlots(change: KeySlotsChange): Boolean {
+        val answer = CompletableDeferred<Boolean>()
+        keySlotsAnswer = answer
+        _state.update { it.copy(keySlotsQuestion = change) }
+        try {
+            return answer.await()
+        } finally {
+            keySlotsAnswer = null
+            _state.update { it.copy(keySlotsQuestion = null) }
+        }
+    }
 
     fun disconnect() {
         viewModelScope.launch {
@@ -213,9 +240,14 @@ internal class CloudBackupViewModel(session: AppSession) : ViewModel() {
         viewModelScope.launch {
             try {
                 val (result, last) = config.open().use { target -> action(target) to backup.lastBackupAt(target) }
-                _state.update { it.copy(lastBackupAt = last, message = result.summary(), messageIsError = false) }
+                val adopted = session.keySlotsAdopted.value?.also { session.acknowledgeKeySlotsAdopted() }
+                val message = result.summary() + (adopted?.let { " " + it.adoptedMessage() } ?: "")
+                _state.update { it.copy(lastBackupAt = last, message = message, messageIsError = false) }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: KeySlotsChangeDeclinedException) {
+                // The user's own "no": nothing went wrong.
+                _state.update { it.copy(message = e.message, messageIsError = false) }
             } catch (e: Exception) {
                 _state.update { it.copy(message = e.message ?: "The backup failed", messageIsError = true) }
             } finally {

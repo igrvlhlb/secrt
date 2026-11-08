@@ -21,6 +21,8 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] mDNS discovery of already-paired devices (Android NsdManager, iOS Network.framework, desktop JmDNS);
       today the phone remembers the computer's address and fixed port, and a new pairing code updates them
 - [x] Sync protocol over the channel (exchange version vectors, then missing revisions and attachments)
+- [x] One password on every device: syncs first agree on the most recent password / recovery-key
+      change; the device that would change asks its user, and a "no" (on either side) cancels the sync
 - [ ] Start a sync from the device that showed the code, e.g. the computer (today only the one that
       scanned connects; the other listens on its Devices screen). Two phones can scan each other's code
 - [ ] Sync on its own while both apps are open (today: "Sync now")
@@ -57,8 +59,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] WebDAV: servers with self-signed certificates (trust a pinned certificate); today TLS must validate
 - [ ] Cloud backup: prune the backup (compact old segments, delete orphaned blobs); today it only grows
 - [ ] Cloud backup: show the backup's devices and sizes; cancel a running backup
-- [ ] Cloud backup: when another device changed the password, offer to adopt the backup's `vault.key`
-      (today each device keeps its own password; the backup holds the last one pushed after a change)
+- [x] Cloud backup: when another device changed the password, offer to adopt the backup's `vault.key`:
+      the most recent key-slot change wins, through a sealed copy (`vault.key.sealed`); pull and sync
+      ask first, and a "no" syncs nothing (LAN sync does the same, see docs/security.md)
 - [ ] Cloud backup: stream segments and blobs instead of holding each file in memory (fine at the 20 MB cap)
 - [x] Restore-from-backup flow on the first screen of a fresh install
 - [ ] Import a backup of a *different* diary (re-encrypt its attachments and remap blob ids)

@@ -12,8 +12,10 @@ import io.github.igrvlhlb.secrt.lan.LanQuestion
 import io.github.igrvlhlb.secrt.lan.LanSync
 import io.github.igrvlhlb.secrt.lan.PairingResult
 import io.github.igrvlhlb.secrt.lan.SyncStats
+import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.storage.Peer
+import io.github.igrvlhlb.secrt.ui.components.adoptedMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
@@ -30,7 +32,7 @@ import kotlinx.coroutines.launch
  *
  * @param canScan whether this device scans codes, and so also takes codes handed in some other way.
  */
-internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, canScan: Boolean) : ViewModel() {
+internal class DevicesViewModel(private val lan: LanSync, session: AppSession, store: DiaryStore, canScan: Boolean) : ViewModel() {
 
     val peers: StateFlow<List<Peer>> = store.peers.observe().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -74,6 +76,13 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, can
                 }
             }
         }
+        viewModelScope.launch {
+            // A sync either way took on another device's newer password: say which one opens it now.
+            session.keySlotsAdopted.filterNotNull().collect { change ->
+                session.acknowledgeKeySlotsAdopted()
+                _snackbar.send(change.adoptedMessage())
+            }
+        }
         if (canScan) {
             // A code that arrived some other way than the scanner (debug builds).
             viewModelScope.launch {
@@ -115,10 +124,12 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, can
         syncing = peer.identityKey
         viewModelScope.launch {
             try {
-                val stats = lan.sync(peer)
+                val stats = lan.sync(peer, ::ask)
                 _snackbar.send("Synced with ${peer.name}: ${stats.describe()}")
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: LanException.Declined) {
+                _snackbar.send(e.message.orEmpty())
             } catch (e: Exception) {
                 notice = Notice("Couldn't sync with ${peer.name}", e.message ?: "Something went wrong")
             } finally {
