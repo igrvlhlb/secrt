@@ -14,6 +14,7 @@ import io.github.igrvlhlb.secrt.storage.EntryDraft
 import io.github.igrvlhlb.secrt.storage.StoreClosedException
 import io.github.igrvlhlb.secrt.vault.Credential
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
+import io.github.igrvlhlb.secrt.vault.InvalidVaultHeaderException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -29,12 +30,13 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class AppSessionTest {
 
     /** One device: its own file system and database file. */
-    private class Device {
+    private class Device(val name: String? = null) {
         val fileSystem = FakeFileSystem()
         val dbFile: File = File.createTempFile("secrt-session", ".db").apply { delete(); deleteOnExit() }
 
@@ -55,6 +57,7 @@ class AppSessionTest {
             cryptoProvider = { SodiumCrypto.create() },
             ioDispatcher = Dispatchers.Default,
             argon2Params = Argon2Params.Insecure,
+            deviceName = { name },
         )
     }
 
@@ -204,5 +207,96 @@ class AppSessionTest {
 
         assertFailsWith<DifferentVaultException> { mine.importFrom(theirs.export()) }
         assertEquals(emptySet(), mine.store.titles())
+    }
+
+    /** The phone and a laptop restored from it: one diary, one data key, each with its own vault.key. */
+    private suspend fun phoneAndLaptop(withRecoveryKey: Boolean = false): Pair<AppSession, AppSession> {
+        val phone = Device("Phone").session()
+        phone.create("pw", withRecoveryKey)
+        phone.store.saveEntry("e1", draft("hello"))
+        val laptop = Device("Laptop").session()
+        laptop.restore(phone.export(), Credential.Password("pw"))
+        return phone to laptop
+    }
+
+    @Test
+    fun theNewestPasswordWinsAndTakesOverOnTheNextUnlock() = runTest {
+        val (phone, laptop) = phoneAndLaptop()
+        // Neither changed anything yet (and neither header is stamped): nothing to do.
+        assertEquals(KeySlotsComparison.Same, phone.compareKeySlots(laptop.vaultKeyJson()))
+
+        laptop.changePassword("pw", "new")
+        assertEquals(KeySlotsComparison.NewerHere, laptop.compareKeySlots(phone.vaultKeyJson()))
+        val change = assertIs<KeySlotsComparison.NewerThere>(phone.compareKeySlots(laptop.vaultKeyJson())).change
+        assertEquals("Laptop", change.changedOn)
+        assertTrue(change.changedAt > 0)
+
+        assertTrue(phone.adoptKeySlots(change))
+        assertEquals(change, phone.keySlotsAdopted.value)
+        assertEquals(KeySlotsComparison.Same, phone.compareKeySlots(laptop.vaultKeyJson()))
+        // Nothing scary: the diary stays open.
+        assertEquals("hello", phone.store.getEntry("e1")?.title)
+        phone.acknowledgeKeySlotsAdopted()
+        assertNull(phone.keySlotsAdopted.value)
+
+        phone.lock()
+        assertFailsWith<InvalidCredentialsException> { phone.unlock("pw") }
+        phone.unlock("new")
+        assertEquals("hello", phone.store.getEntry("e1")?.title)
+
+        // Later, the phone changes it again: now the laptop is behind.
+        phone.changePassword("new", "newer")
+        val back = assertIs<KeySlotsComparison.NewerThere>(laptop.compareKeySlots(phone.vaultKeyJson())).change
+        assertEquals("Phone", back.changedOn)
+        assertTrue(back.changedAt >= change.changedAt)
+        assertTrue(laptop.adoptKeySlots(back))
+        laptop.lock()
+        laptop.unlock("newer")
+    }
+
+    @Test
+    fun recoveryKeyChangesTravelTheSameWay() = runTest {
+        val (phone, laptop) = phoneAndLaptop(withRecoveryKey = true)
+        val newKey = phone.regenerateRecoveryKey()
+        laptop.adoptKeySlots(assertIs<KeySlotsComparison.NewerThere>(laptop.compareKeySlots(phone.vaultKeyJson())).change)
+        laptop.lock()
+        laptop.unlockWithRecoveryKey(newKey)
+        assertTrue(laptop.hasRecoveryKey())
+
+        phone.removeRecoveryKey()
+        laptop.adoptKeySlots(assertIs<KeySlotsComparison.NewerThere>(laptop.compareKeySlots(phone.vaultKeyJson())).change)
+        assertFalse(laptop.hasRecoveryKey())
+        laptop.lock()
+        assertFailsWith<InvalidCredentialsException> { laptop.unlockWithRecoveryKey(newKey) }
+        laptop.unlock("pw")
+    }
+
+    @Test
+    fun aChangeIsNotAdoptedOverANewerOneMadeMeanwhile() = runTest {
+        val (phone, laptop) = phoneAndLaptop()
+        laptop.changePassword("pw", "from the laptop")
+        val change = assertIs<KeySlotsComparison.NewerThere>(phone.compareKeySlots(laptop.vaultKeyJson())).change
+        // While the user was deciding, they changed the password on the phone too (a moment later).
+        Thread.sleep(5)
+        phone.changePassword("pw", "from the phone")
+
+        assertFalse(phone.adoptKeySlots(change))
+        assertNull(phone.keySlotsAdopted.value)
+        phone.lock()
+        phone.unlock("from the phone")
+        assertEquals(KeySlotsComparison.NewerHere, phone.compareKeySlots(laptop.vaultKeyJson()))
+    }
+
+    @Test
+    fun keySlotsOfAnotherDiaryAreRefused() = runTest {
+        val (phone, _) = phoneAndLaptop()
+        val stranger = Device("Stranger").session()
+        stranger.create("pw", withRecoveryKey = false)
+        stranger.changePassword("pw", "theirs")
+
+        assertFailsWith<InvalidVaultHeaderException> { phone.compareKeySlots(stranger.vaultKeyJson()) }
+        assertFailsWith<InvalidVaultHeaderException> { phone.compareKeySlots("{}") }
+        phone.lock()
+        phone.unlock("pw")
     }
 }

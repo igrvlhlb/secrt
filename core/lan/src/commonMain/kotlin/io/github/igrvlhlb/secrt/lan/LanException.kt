@@ -30,8 +30,14 @@ sealed class LanException(message: String, cause: Throwable? = null) : Exception
     /** A device without a diary scanned the code of another one without a diary: there's nothing to set it up from. */
     class NoDiary : LanException("The other device has no diary yet. Scan the code of the device that holds your diary.")
 
-    /** The other side runs a version of secrt that can't set up a device that scanned its code. */
-    class Outdated : LanException("The other device needs a newer version of secrt to set this one up. Update it and try again.")
+    /** The other side runs a version of secrt too old for what was asked (setting this device up, or syncing). */
+    class Outdated(name: String = "The other device") : LanException("$name runs an older version of secrt. Update secrt on it and try again.")
+
+    /** The user said no on this device (or didn't answer in time): nothing was exchanged. */
+    class Declined(message: String) : LanException(message)
+
+    /** The other device's user said no, or didn't answer in time: nothing was exchanged. */
+    class DeclinedThere(message: String) : LanException(message)
 
     /** The diary is locked on this or the other side. */
     class Locked : LanException("The diary is locked. Unlock it on both devices and try again.")

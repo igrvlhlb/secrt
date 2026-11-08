@@ -8,12 +8,16 @@ import androidx.lifecycle.viewModelScope
 import io.github.igrvlhlb.secrt.lan.LanException
 import io.github.igrvlhlb.secrt.lan.LanHost
 import io.github.igrvlhlb.secrt.lan.LanProgress
+import io.github.igrvlhlb.secrt.lan.LanQuestion
 import io.github.igrvlhlb.secrt.lan.LanSync
 import io.github.igrvlhlb.secrt.lan.PairingResult
 import io.github.igrvlhlb.secrt.lan.SyncStats
+import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.storage.Peer
+import io.github.igrvlhlb.secrt.ui.components.adoptedMessage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -28,7 +32,7 @@ import kotlinx.coroutines.launch
  *
  * @param canScan whether this device scans codes, and so also takes codes handed in some other way.
  */
-internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, canScan: Boolean) : ViewModel() {
+internal class DevicesViewModel(private val lan: LanSync, session: AppSession, store: DiaryStore, canScan: Boolean) : ViewModel() {
 
     val peers: StateFlow<List<Peer>> = store.peers.observe().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -47,6 +51,15 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, can
 
     data class Notice(val title: String, val text: String)
 
+    /**
+     * A question from a pairing or sync this device started, waiting for [answer]. Those from
+     * devices connecting to this one come through [LanHost.question].
+     */
+    var question by mutableStateOf<LanQuestion?>(null)
+        private set
+
+    private var pendingAnswer: CompletableDeferred<Boolean>? = null
+
     private val _snackbar = Channel<String>(Channel.BUFFERED)
     val snackbar = _snackbar.receiveAsFlow()
 
@@ -59,8 +72,15 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, can
                     is LanHost.Event.Synced -> _snackbar.send("Synced with ${event.peerName}: ${event.stats.describe()}")
                     is LanHost.Event.Failed -> _snackbar.send(event.message)
                     is LanHost.Event.DiarySent -> notice = diarySent(event.peerName)
-                    is LanHost.Event.DiaryReceived -> Unit
+                    is LanHost.Event.DiaryReceived, is LanHost.Event.WaitingForAnswer -> Unit
                 }
+            }
+        }
+        viewModelScope.launch {
+            // A sync either way took on another device's newer password: say which one opens it now.
+            session.keySlotsAdopted.filterNotNull().collect { change ->
+                session.acknowledgeKeySlotsAdopted()
+                _snackbar.send(change.adoptedMessage())
             }
         }
         if (canScan) {
@@ -79,13 +99,16 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, can
         progress = "Connecting…"
         viewModelScope.launch {
             try {
-                val result = lan.pair(link) { progress = it.label() }
+                val result = lan.pair(link, ::ask) { progress = it.label() }
                 notice = when (result) {
                     is PairingResult.Paired -> Notice("Paired with ${result.peerName}", "Synced: ${result.stats.describe()}.")
                     is PairingResult.DiarySent -> diarySent(result.peerName)
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: LanException.Declined) {
+                // The user's own "no": nothing went wrong.
+                _snackbar.send(e.message.orEmpty())
             } catch (e: LanException) {
                 notice = Notice("Couldn't pair", e.message.orEmpty())
             } catch (e: Exception) {
@@ -101,15 +124,34 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, can
         syncing = peer.identityKey
         viewModelScope.launch {
             try {
-                val stats = lan.sync(peer)
+                val stats = lan.sync(peer, ::ask)
                 _snackbar.send("Synced with ${peer.name}: ${stats.describe()}")
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: LanException.Declined) {
+                _snackbar.send(e.message.orEmpty())
             } catch (e: Exception) {
                 notice = Notice("Couldn't sync with ${peer.name}", e.message ?: "Something went wrong")
             } finally {
                 syncing = null
             }
+        }
+    }
+
+    fun answer(accept: Boolean) {
+        pendingAnswer?.complete(accept)
+    }
+
+    /** Shows [question] until it's answered, or the pairing gives up on it (timeout, lock, screen closed). */
+    private suspend fun ask(question: LanQuestion): Boolean {
+        val answer = CompletableDeferred<Boolean>()
+        pendingAnswer = answer
+        this.question = question
+        try {
+            return answer.await()
+        } finally {
+            this.question = null
+            pendingAnswer = null
         }
     }
 
@@ -134,6 +176,7 @@ internal class DevicesViewModel(private val lan: LanSync, store: DiaryStore, can
 internal fun LanProgress.label() = when (this) {
     LanProgress.Connecting -> "Connecting…"
     LanProgress.SendingDiary -> "Sending the diary…"
+    LanProgress.WaitingForAnswer -> "Waiting for an answer on the other device…"
     LanProgress.ReceivingDiary -> "Receiving the diary…"
     LanProgress.Syncing -> "Syncing…"
 }

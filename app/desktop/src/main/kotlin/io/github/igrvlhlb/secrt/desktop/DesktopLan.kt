@@ -27,7 +27,7 @@ fun desktopLanSync(session: AppSession, dataDirectory: File): LanSync {
 }
 
 /** The name the user gave this computer ("Igor's MacBook Air"), else its host name. */
-private fun computerName(): String {
+internal fun computerName(): String {
     if (System.getProperty("os.name").orEmpty().startsWith("Mac")) {
         runCatching {
             val process = ProcessBuilder("scutil", "--get", "ComputerName").redirectErrorStream(true).start()

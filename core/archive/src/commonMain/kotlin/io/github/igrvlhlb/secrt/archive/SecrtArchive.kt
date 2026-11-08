@@ -153,6 +153,23 @@ object SecrtArchive {
         }
     }
 
+    /**
+     * Encrypts another small file of a backup (e.g. a copy of `vault.key` other devices can trust)
+     * with the archive key, bound to the vault and to [name] the same way as a segment.
+     */
+    fun sealFile(crypto: Crypto, keys: VaultKeys, name: String, bytes: ByteArray): ByteArray =
+        crypto.seal(keys.archiveKey, bytes, aad(keys.vaultId, name))
+
+    /**
+     * Reverses [sealFile].
+     * @throws CorruptArchiveException if [data] was tampered with, renamed, or sealed for another diary.
+     */
+    fun openFile(crypto: Crypto, keys: VaultKeys, name: String, data: ByteArray): ByteArray = try {
+        crypto.open(keys.archiveKey, data, aad(keys.vaultId, name))
+    } catch (e: DecryptionException) {
+        throw CorruptArchiveException("$name can't be decrypted", e)
+    }
+
     /** Suggested file name for an export made on [date] (ISO `yyyy-MM-dd`). */
     fun fileName(date: String) = "secrt-backup-$date.$EXTENSION"
 

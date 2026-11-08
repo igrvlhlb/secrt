@@ -35,7 +35,10 @@ decisions and core architecture first, then features, then UI/UX.
 - **Key slots** (LUKS-style) in a small `vault.key` header:
   - Password slot: Argon2id(password, salt, params stored in header) → KEK → XChaCha20-Poly1305(DEK).
   - Recovery slot (optional): random 128+ bit key shown as words/groups → wraps the same DEK.
-  - Password change = rewrap the DEK only; no re-encryption.
+  - Password change = rewrap the DEK only; no re-encryption. Each key-slot change is stamped
+    (`slotsChanged`: HLC + the device's name sealed with the archive key), and the most recent one
+    travels to the user's other devices through LAN sync and cloud backup, after asking on the
+    device that would change (see docs/security.md, "Changing the password").
 - Device identity: an Ed25519 key pair per replica, its 32-byte seed kept in the encrypted DB (`meta`).
   Used to authenticate LAN connections; key exchange uses fresh X25519 keys per connection (see below).
 - Desktop always asks for the password on open (per notes).
@@ -123,6 +126,8 @@ files under the target's root:
 secrt/<vaultId>/
   manifest.json                # {"format":1,"vaultId":"…"}; plain. A newer format is refused.
   vault.key                    # key slots, as on the devices (no secrets in clear)
+  vault.key.sealed             # the same, sealed with the archive subkey,
+                               #   AAD = "secrt-archive:<vaultId>:vault.key.sealed"
   log/<deviceId>-<n>.seg       # revisions, sealed exactly like .secrt segments: archive subkey,
                                #   AAD = "secrt-archive:<vaultId>:log/<deviceId>-<n>.seg"
   blobs/<blobId>               # attachments, encrypted exactly as stored on the devices
@@ -132,15 +137,26 @@ secrt/<vaultId>/
   overwrite each other's data, so pushes need no locking or conditional writes; merging happens on
   the clients through the sync engine. A segment may hold other devices' revisions (e.g. learned by
   LAN sync): the backup must get everything the pushing device has.
-- **Push** (manual): `manifest.json` if missing; `vault.key` if missing, or if it changed *on this
-  device* since it last uploaded it (so a device that never saw another's password change can't
-  put the old password back); then the blobs the new revisions reference that aren't listed under
+- **Push** (manual): `manifest.json` if missing; `vault.key` if missing, or if this device's
+  key-slot stamp is newer than the sealed copy's (so a device that never saw another's password
+  change can't put the old password back), first in clear, then sealed (if the push stops in
+  between, the sealed copy is still the older one and the next push uploads both again; on a backup
+  without a sealed copy, made before it existed, the plain one's stamp is compared, or failing
+  stamps, the old rule applies: only if it changed on this device); then the blobs the new
+  revisions reference that aren't listed under
   `blobs/`; then the revisions as segments of at most 2000. The revisions come from
   `DiaryStore.revisionsSince(remote)`, so this device's revisions are marked shared and never
   amended again. **Pull**: list `log/`, download the segments not seen yet, decrypt and check all of
   them and the blobs they need (blob ids are keyed hashes, checked on arrival), and only then
   `applyRemote`. Any damaged, tampered or renamed file stops the pull with nothing merged. A blob
   missing on the server (its writer never had it) is counted and skipped. **Sync** = pull, then push.
+- **Key slots on pull and sync**: if the sealed `vault.key` (opened with the archive key, checked
+  with `VaultManager.verifyExternal`: same diary id, key-check value of this data key) has a newer
+  stamp than this device's, the `confirmKeySlots` callback asks the user first, *outside* the
+  session lock (the user may take a while; the diary must still be able to lock). No: nothing is
+  downloaded or uploaded (`KeySlotsChangeDeclinedException`). Yes: the operation runs, checks that
+  the sealed copy is still the one accepted ("the backup changed meanwhile" otherwise), and installs
+  it after merging. The plain `vault.key` is never taken on: the server can replace it.
 - Bookkeeping per target, in the encrypted DB's `meta` table (`backup.state:<target id>`, JSON): the
   version vector the target is known to hold (read from or written to it), the highest segment
   number read per writing device, the `vault.key` last uploaded, and the last backup time. It is a
@@ -183,17 +199,19 @@ computers can't pair yet.
   Then, by what each side holds:
   - the same diary (same vault id): they store each other as peers and sync right away;
   - the shower has no diary (a computer on its first screen, "Set up from your phone", which listens
-    the same way): the scanner sends it this one as an encrypted `.secrt` archive (the backup
+    the same way): once the scanner's user confirms (*Send a copy of your encrypted diary to
+    "<name>"?*), it sends this one as an encrypted `.secrt` archive (the backup
     format, staged in a temp file on both sides), and the user types the diary's password or
     recovery key on the computer, which restores it with the backup code path and keeps the phone
     as a peer;
   - different diaries: both refuse, nothing is stored or sent.
 - Setting up a phone from another device (a lost phone while the computer still has the diary, or
   a second phone): "Set up from another device" on the phone's first screen opens the scanner. It
-  scans the code shown by a device that has the diary, which sends it the same `.secrt` archive;
-  the user types the diary's password or recovery key on the new phone, and both keep each other as
-  peers. The shower's user showing the (one-time, 5-minute) code is the consent, as for pairing.
-  If the shower has no diary either, the scanner says so and nothing is sent.
+  scans the code shown by a device that has the diary, which asks its user (*"<name>" wants a copy
+  of your diary. Send it?*) and then sends it the same `.secrt` archive; the user types the diary's
+  password or recovery key on the new phone, and both keep each other as peers. Showing the code
+  isn't consent enough: someone could photograph it and scan it first. If the shower has no diary
+  either, the scanner says so and nothing is sent.
 - Later: "Sync now" next to a peer this device scanned. Both apps open and unlocked, the other one
   showing Devices. "Forget" (either side) unpairs: the other side is then rejected.
 
@@ -227,28 +245,46 @@ Counters make frames impossible to drop, replay or reorder unnoticed; conversati
 explicit messages (`done`, `archiveEnd`), so a cut connection is never taken as complete. Frames are
 at most 24 MiB (one 20 MB attachment); reads time out (15 s handshake, 2 min per frame).
 
-**After the handshake: `hello`** both ways (I first): name, device id, vault id. A `null` vault id
-means "no diary yet, set me up" (defined that way from the start, so no version bump was needed):
-- I has none, R has one (pair mode only): R answers with its hello and sends the archive
-  (`archive`, chunks, `archiveEnd`; I confirms with `received`). Both pair; R learns I's device id
-  at the first sync (restoring gives a new one).
-- I has one, R has none (R is a computer listening for "Set up from your phone"): the other way round.
+**After the handshake: `hello`** both ways (I first): name, device id, vault id, and `protocol`, what
+that app understands (missing, so 1, from versions before it; they ignore the field). A `null`
+vault id means "no diary yet, set me up" (defined that way from the start, so no version bump was
+needed):
+- I has none, R has one (pair mode only): R answers with its hello, asks its user, and sends the
+  archive (`archive`, chunks, `archiveEnd`; I confirms with `received`). Both pair; R learns I's
+  device id at the first sync (restoring gives a new one).
+- I has one, R has none (R is a computer listening for "Set up from your phone"): the other way round
+  (I asks its user after R's hello).
+- **Asking the user** (`LanQuestion`; the connecting side passes a callback, the listening side
+  publishes `LanHost.question`): the other side waits on its read, which times out after 2 minutes,
+  so the question waits 90 s at most and the other side always hears back: `failure(SendDeclined)`
+  for "no", `failure(NoAnswer)` on timeout, `failure(Locked)` if the diary locked meanwhile (the
+  question goes away with it, and with the screen). Peers of protocol 1 can't read the first two
+  and get `failure(Protocol)` instead ("rejected by the other device"). Protocol 2 is what asks;
+  3 also agrees on key slots in every sync (below), and syncs need both sides at 3: the side that
+  finds the other below sends `failure(Protocol)` and says "update secrt on <name>".
 - Neither: R refuses with `failure(NoDiary)`. Same vault id: sync. Different: `failure(DifferentDiary)`.
 - A host from before this answers a diary-less hello with `DifferentDiary`; the scanner reports it
   as "update secrt on the other device".
 
 **Sync protocol** (`SyncExchange.kt`), strictly taking turns so neither side blocks on a full TCP
-buffer: hellos as above; version vectors both ways; I sends the
+buffer: hellos as above; `keySlots` both ways (each side's `vault.key`, I first), checked against
+this diary's data key; the side with the older stamp asks its user (`LanQuestion.AdoptKeySlots`)
+before reading on, while the other waits (as for the questions above, the answer comes within
+90 s, under the 2-minute read timeout), and a "no" is `failure(KeySlotsDeclined)` in place of its
+version vector, so no revision moves either way; version vectors both ways; I sends the
 revisions R lacks (`DiaryStore.revisionsSince`, which marks them shared) in batches; R asks for the
 attachments those revisions reference that it lacks, receives them as stored (encrypted; verified
 with `BlobStore.putEncrypted`), then applies the revisions with `applyRemote`; the same in the other
-direction; `done` both ways. Attachments are stored before the revisions that reference them, so an
-interrupted sync can't leave entries pointing at attachments no later sync would send.
+direction; `done` both ways; then the side that said yes installs the other's `vault.key` (after,
+not before: an interrupted sync leaves the password unchanged and asks again next time).
+Attachments are stored before the revisions that reference them, so an interrupted sync can't
+leave entries pointing at attachments no later sync would send.
 
 **Validation.** Nothing is read before the channel authenticates. After that, every message is still
-checked: sizes, revision shape (id = `deviceId:seq`, payload parses as its record type, deletion iff
-no payload), version vectors, attachment ids (64 hex chars, so they can't be paths), and attachments
-only answer requests for blobs the sent revisions reference.
+checked: sizes, key slots (this diary's id and data key), revision shape (id = `deviceId:seq`,
+payload parses as its record type, deletion iff no payload), version vectors, attachment ids (64
+hex chars, so they can't be paths), and attachments only answer requests for blobs the sent
+revisions reference.
 
 **Finding the other device again: remembered address, not mDNS.** The scanner stores the address
 that worked (plus the others from the code) and the port; the shower always tries the same port. On
@@ -273,7 +309,7 @@ before there is a diary, on "Set up from another device"; with the app already o
 hook doesn't exist there.
 
 **Not done yet** (see BACKLOG.md): numeric-code pairing with a PAKE, mDNS discovery, the computer
-starting a sync, computer ↔ computer, asking before sending a diary, iOS.
+starting a sync, computer ↔ computer, iOS.
 
 ## Module layout
 ```

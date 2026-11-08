@@ -14,13 +14,15 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [x] LAN pairing via QR: a device shows a one-time code, a phone scans it (CameraX + ZXing)
 - [x] Set up a computer from the phone: it receives the encrypted diary and opens it with the password
 - [x] Set up a phone from another device ("Set up from another device" on its first screen): it scans
-      the code of a device that has the diary and receives it. Showing the code is the only consent,
-      as for the join above (see "LAN join" under Security & privacy, which now applies both ways)
+      the code of a device that has the diary and receives it, once the user confirms on that device
+      (see "LAN join" under Security & privacy)
 - [ ] Numeric-code pairing with a PAKE (CPace on ristretto255)
 - [x] Authenticated, encrypted LAN channel (ephemeral X25519 via crypto_kx + Ed25519 identity signatures, SIGMA-I style)
 - [ ] mDNS discovery of already-paired devices (Android NsdManager, iOS Network.framework, desktop JmDNS);
       today the phone remembers the computer's address and fixed port, and a new pairing code updates them
 - [x] Sync protocol over the channel (exchange version vectors, then missing revisions and attachments)
+- [x] One password on every device: syncs first agree on the most recent password / recovery-key
+      change; the device that would change asks its user, and a "no" (on either side) cancels the sync
 - [ ] Start a sync from the device that showed the code, e.g. the computer (today only the one that
       scanned connects; the other listens on its Devices screen). Two phones can scan each other's code
 - [ ] Sync on its own while both apps are open (today: "Sync now")
@@ -57,8 +59,9 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] WebDAV: servers with self-signed certificates (trust a pinned certificate); today TLS must validate
 - [ ] Cloud backup: prune the backup (compact old segments, delete orphaned blobs); today it only grows
 - [ ] Cloud backup: show the backup's devices and sizes; cancel a running backup
-- [ ] Cloud backup: when another device changed the password, offer to adopt the backup's `vault.key`
-      (today each device keeps its own password; the backup holds the last one pushed after a change)
+- [x] Cloud backup: when another device changed the password, offer to adopt the backup's `vault.key`:
+      the most recent key-slot change wins, through a sealed copy (`vault.key.sealed`); pull and sync
+      ask first, and a "no" syncs nothing (LAN sync does the same, see docs/security.md)
 - [ ] Cloud backup: stream segments and blobs instead of holding each file in memory (fine at the 20 MB cap)
 - [x] Restore-from-backup flow on the first screen of a fresh install
 - [ ] Import a backup of a *different* diary (re-encrypt its attachments and remap blob ids)
@@ -79,7 +82,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] Web client (in-browser, talks to WebDAV/Drive backups directly; no LAN sync)
 
 ## Security & privacy
-- [ ] LAN join: ask on the phone "Send your encrypted diary to <computer>?" before sending it to a computer that has no diary yet. Today scanning the QR code is the only consent, so a scanned QR from an attacker's machine yields the encrypted diary for offline password guessing.
+- [x] LAN join: the sending device asks before sending its diary to a device without one, naming it, both
+      when the phone scans a computer's "Set up from your phone" code ("Send a copy of your encrypted diary
+      to …?") and when a new device scans this one's code ("… wants a copy of your diary. Send it?").
+      A "no", no answer within 90 s, or locking sends nothing, and the other side is told why
 - [x] Biometric unlock on Android, opt-in: DEK wrapped by an AES-GCM Android Keystore key (StrongBox when
       present) that needs a Class 3 biometric for every use and dies when fingerprints change
 - [ ] Biometric unlock on iOS (Keychain + LocalAuthentication)

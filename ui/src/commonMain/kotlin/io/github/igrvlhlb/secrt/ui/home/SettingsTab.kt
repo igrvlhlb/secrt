@@ -253,7 +253,7 @@ fun SettingsTab(session: AppSession) {
     }
     if (changingPassword) {
         ChangePasswordDialog(
-            onChange = { current, new -> session.changePassword(current, new); snackbar.showSnackbar("Password changed") },
+            onChange = { current, new -> session.changePassword(current, new); snackbar.showSnackbar("Password changed. Your other devices take it on when they sync.") },
             onDismiss = { changingPassword = false },
         )
     }

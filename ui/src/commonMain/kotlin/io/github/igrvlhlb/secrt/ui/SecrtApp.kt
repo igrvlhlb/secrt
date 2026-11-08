@@ -177,7 +177,7 @@ private fun DiaryNavigation(store: DiaryStore, session: AppSession, autoLock: Au
             }
         }
         if (lan != null) {
-            composable<DevicesRoute> { DevicesScreen(lan, store, onBack = { nav.popBackStack(HomeRoute, inclusive = false) }) }
+            composable<DevicesRoute> { DevicesScreen(lan, session, store, onBack = { nav.popBackStack(HomeRoute, inclusive = false) }) }
         }
         composable<EditorRoute> { entry ->
             val route = entry.toRoute<EditorRoute>()

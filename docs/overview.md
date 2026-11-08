@@ -105,7 +105,7 @@ On Android, files are in the app's private storage (`files/vault/…`, plus the 
 
 | File | Contents | Encrypted? |
 |---|---|---|
-| `vault/vault.key` | Diary id, key slots (the data key wrapped by the password and by the recovery key), Argon2 parameters, key-check value | The data key inside is wrapped; the rest is plain and holds no secrets |
+| `vault/vault.key` | Diary id, key slots (the data key wrapped by the password and by the recovery key), Argon2 parameters, key-check value, when (and on which device, sealed) the slots last changed | The data key inside is wrapped; the rest is plain and holds no secrets |
 | `secrt.db` | SQLCipher database: revisions, derived entry/folder/label tables, paired devices, this device's identity, backup settings and credentials | Whole file (SQLCipher, AES-256) |
 | `vault/blobs/<id>` | Attachments, one file each | XChaCha20-Poly1305 |
 | `vault/settings.json` | Auto-lock preferences, readable while locked | Plain, no diary content |

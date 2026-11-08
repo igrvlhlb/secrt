@@ -17,12 +17,14 @@ import java.nio.file.StandardOpenOption
  */
 fun desktopSession(dataDirectory: File): AppSession {
     ensureDataDirectory(dataDirectory)
+    val name by lazy(::computerName)
     return AppSession(
         fileSystem = FileSystem.SYSTEM,
         vaultDirectory = dataDirectory.toOkioPath() / "vault",
         driverFactory = SqlCipherDriverFactory(File(dataDirectory, "secrt.db")),
         cryptoProvider = { SodiumCrypto.create() },
         ioDispatcher = Dispatchers.IO,
+        deviceName = { name },
     )
 }
 

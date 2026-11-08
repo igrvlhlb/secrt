@@ -53,6 +53,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.igrvlhlb.secrt.lan.LanHost
 import io.github.igrvlhlb.secrt.lan.LanSync
+import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.storage.Peer
 import io.github.igrvlhlb.secrt.ui.components.ConfirmDialog
@@ -68,8 +69,8 @@ import kotlin.time.Instant
  * devices' codes are scanned and syncs started.
  */
 @Composable
-fun DevicesScreen(lan: LanSync, store: DiaryStore, onBack: () -> Unit) {
-    val vm = viewModel { DevicesViewModel(lan, store, canScanCodes) }
+fun DevicesScreen(lan: LanSync, session: AppSession, store: DiaryStore, onBack: () -> Unit) {
+    val vm = viewModel { DevicesViewModel(lan, session, store, canScanCodes) }
     val peers by vm.peers.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var scanning by remember { mutableStateOf(false) }
@@ -128,7 +129,11 @@ fun DevicesScreen(lan: LanSync, store: DiaryStore, onBack: () -> Unit) {
         }
     }
 
-    vm.progress?.let { label ->
+    // From a pairing started here, or from a device connecting to this one; one at a time either way.
+    val hostQuestion by vm.host.question.collectAsStateWithLifecycle()
+    vm.question?.let { question -> LanQuestionDialog(question, vm::answer) }
+        ?: hostQuestion?.let { question -> LanQuestionDialog(question) { vm.host.answer(question, it) } }
+    vm.progress?.takeIf { vm.question == null }?.let { label ->
         AlertDialog(
             onDismissRequest = {},
             text = {
@@ -208,7 +213,7 @@ private fun SyncSection(host: LanHost, canScan: Boolean, onShowCode: () -> Unit,
                     invite = invite,
                     instructions = "In secrt on your phone, open Settings → Devices → Scan a code, and scan this one. A new " +
                         "phone can scan it from \"Set up from another device\" on its first screen to receive this diary, " +
-                        "still encrypted.",
+                        "still encrypted, once you confirm here.",
                     onNewCode = onShowCode,
                     onCancel = { codeShown = false; onHideCode() },
                 )
