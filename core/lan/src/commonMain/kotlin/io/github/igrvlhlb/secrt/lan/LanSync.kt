@@ -3,6 +3,8 @@ package io.github.igrvlhlb.secrt.lan
 import io.github.igrvlhlb.secrt.crypto.Crypto
 import io.github.igrvlhlb.secrt.crypto.KeyPair
 import io.github.igrvlhlb.secrt.session.AppSession
+import io.github.igrvlhlb.secrt.session.KeySlotsChange
+import io.github.igrvlhlb.secrt.session.KeySlotsComparison
 import io.github.igrvlhlb.secrt.session.SessionState
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.storage.Peer
@@ -64,6 +66,12 @@ sealed class LanQuestion {
      * the code [peerName] showed to be set up.
      */
     class SendDiary(override val peerName: String, val peerAsked: Boolean) : LanQuestion()
+
+    /**
+     * Syncing with [peerName] means taking on its newer password and recovery key ([change]): this
+     * device then opens with them from its next unlock. "No" cancels the whole sync.
+     */
+    class AdoptKeySlots(override val peerName: String, val change: KeySlotsChange) : LanQuestion()
 }
 
 sealed interface PairingResult {
@@ -123,6 +131,9 @@ class LanSync(
 ) {
     private val clientLock = Mutex()
 
+    /** What this device's hellos announce ([Hello.protocol]); only tests lower it, to stand in for an older version. */
+    internal var protocolVersion = PROTOCOL_VERSION
+
     /**
      * A pairing code handed in from outside the in-app scanner; the Devices screen picks it up.
      * Only debug builds set it (an intent extra, for testing without a camera).
@@ -139,7 +150,8 @@ class LanSync(
     /**
      * Pairs with the device showing the QR code [link], then syncs with it, or sets it up with
      * this diary if it has none. That last one goes through [ask] first ([LanQuestion.SendDiary]):
-     * anyone can show a code, so scanning one isn't consent enough to hand over the diary.
+     * anyone can show a code, so scanning one isn't consent enough to hand over the diary. A sync
+     * may ask too, as in [sync].
      *
      * @throws LanException ([LanException.Declined] if the user said no to [ask]).
      */
@@ -160,7 +172,7 @@ class LanSync(
             } finally {
                 crypto.wipe(identity.secretKey)
             }
-            messages.send(Hello(deviceName().clean(), store.deviceId, vaultId, PROTOCOL_VERSION))
+            messages.send(Hello(deviceName().clean(), store.deviceId, vaultId, protocolVersion))
             val hello = messages.expect<Hello>()
             val name = hello.deviceName.clean()
             messages.peerName = name
@@ -181,9 +193,11 @@ class LanSync(
                     PairingResult.DiarySent(name)
                 }
                 vaultId -> {
+                    requireKeySlots(messages, hello)
                     store.peers.pair(peerKey, name, hello.deviceId, addresses, now())
                     progress(LanProgress.Syncing)
-                    val stats = SyncExchange.run(messages, store, initiator = true)
+                    val turn = KeySlotsTurn(this@LanSync, name, ask) { progress(LanProgress.WaitingForAnswer) }
+                    val stats = SyncExchange.run(messages, store, initiator = true, turn)
                     store.peers.recordSync(peerKey, name, hello.deviceId, addresses, store.versionVector(), now())
                     PairingResult.Paired(name, stats)
                 }
@@ -217,7 +231,7 @@ class LanSync(
                 } finally {
                     crypto.wipe(identity.secretKey)
                 }
-                messages.send(Hello(deviceName().clean(), deviceId = null, vaultId = null, PROTOCOL_VERSION))
+                messages.send(Hello(deviceName().clean(), deviceId = null, vaultId = null, protocolVersion))
                 val hello = try {
                     messages.expect<Hello>()
                 } catch (e: LanException.DifferentDiary) {
@@ -228,7 +242,7 @@ class LanSync(
                 if (hello.vaultId == null) throw LanException.Protocol("no diary")
                 messages.peerName = hello.deviceName.clean()
                 // Versions from before the question send right away.
-                progress(if (hello.protocol >= PROTOCOL_VERSION) LanProgress.WaitingForAnswer else LanProgress.ReceivingDiary)
+                progress(if (hello.protocol >= PROTOCOL_ASKS) LanProgress.WaitingForAnswer else LanProgress.ReceivingDiary)
                 val file = receiveDiary(messages) { progress(LanProgress.ReceivingDiary) }
                 messages.send(Received)
                 val addresses = (listOf(address) + invite.addresses.map { "$it:${invite.port}" }).distinct()
@@ -243,9 +257,19 @@ class LanSync(
     /**
      * Syncs with a paired device at the address it was last reached at (see [Peer.addresses]).
      *
-     * @throws LanException
+     * Both devices also agree on the newest password and recovery key, before any change is
+     * exchanged. If the other device's are newer, [ask] asks whether to take them on
+     * ([LanQuestion.AdoptKeySlots]); if this device's are, the other one asks its user. A "no" on
+     * either side cancels the whole sync.
+     *
+     * @throws LanException ([LanException.Declined] if the user said no to [ask],
+     *   [LanException.DeclinedThere] if the other device's user did).
      */
-    suspend fun sync(peer: Peer, progress: (LanProgress) -> Unit = {}): SyncStats = client {
+    suspend fun sync(
+        peer: Peer,
+        ask: suspend (LanQuestion) -> Boolean = { false },
+        progress: (LanProgress) -> Unit = {},
+    ): SyncStats = client {
         val store = unlockedStore()
         val vaultId = session.vaultId ?: throw LanException.Locked()
         if (peer.addresses.isEmpty()) throw LanException.Unreachable(peer.name)
@@ -258,7 +282,7 @@ class LanSync(
             } finally {
                 crypto.wipe(identity.secretKey)
             }
-            messages.send(Hello(deviceName().clean(), store.deviceId, vaultId, PROTOCOL_VERSION))
+            messages.send(Hello(deviceName().clean(), store.deviceId, vaultId, protocolVersion))
             val hello = try {
                 messages.expect<Hello>()
             } catch (e: LanException.UnknownDevice) {
@@ -266,8 +290,10 @@ class LanSync(
             }
             messages.peerName = hello.deviceName.clean()
             if (hello.vaultId != vaultId) throw LanException.DifferentDiary()
+            requireKeySlots(messages, hello)
             progress(LanProgress.Syncing)
-            val stats = SyncExchange.run(messages, store, initiator = true)
+            val turn = KeySlotsTurn(this@LanSync, messages.peerName, ask) { progress(LanProgress.WaitingForAnswer) }
+            val stats = SyncExchange.run(messages, store, initiator = true, turn)
             val addresses = (listOf(address) + peer.addresses).distinct()
             store.peers.recordSync(peer.identityKey, hello.deviceName.clean(), hello.deviceId, addresses, store.versionVector(), now())
             stats
@@ -326,6 +352,23 @@ class LanSync(
     internal fun unlockedStoreOrNull(): DiaryStore? = (session.state.value as? SessionState.Unlocked)?.store
 
     internal fun vaultId(): String? = session.vaultId
+
+    internal suspend fun ownKeySlots(): String = session.vaultKeyJson()
+
+    internal suspend fun compareKeySlots(theirs: String): KeySlotsComparison = session.compareKeySlots(theirs)
+
+    internal suspend fun adoptKeySlots(change: KeySlotsChange): Boolean = session.adoptKeySlots(change)
+
+    /**
+     * A sync starts by agreeing on key slots ([SyncExchange]), which versions before protocol 3
+     * don't do. Syncing without would let the devices drift apart silently, so it fails, in terms
+     * the other side can read, and this side asks the user to update the other one.
+     */
+    internal suspend fun requireKeySlots(messages: MessageChannel, hello: Hello) {
+        if (hello.protocol >= PROTOCOL_KEY_SLOTS) return
+        messages.send(Failure(Failure.Reason.Protocol))
+        throw LanException.Outdated(hello.deviceName.clean())
+    }
 
     private fun unlockedStore(): DiaryStore = unlockedStoreOrNull() ?: throw LanException.Locked()
 
@@ -444,7 +487,7 @@ class LanSync(
             Answer.Locked -> Failure.Reason.Locked
         }
         // Versions from before the question can't read its reasons; this is the closest they know.
-        val understood = reason == Failure.Reason.Locked || protocol >= PROTOCOL_VERSION
+        val understood = reason == Failure.Reason.Locked || protocol >= PROTOCOL_ASKS
         messages.send(Failure(if (understood) reason else Failure.Reason.Protocol))
         throw if (answer == Answer.Locked) LanException.Locked() else LanException.Declined(declinedHere)
     }
@@ -492,11 +535,14 @@ class LanSync(
     companion object {
         const val DEFAULT_PORT = 47820
 
-        /**
-         * What this side of the conversation understands, sent in [Hello.protocol]: 2 asks the
-         * user before sending a diary.
-         */
-        internal const val PROTOCOL_VERSION = 2
+        /** What this side of the conversation understands, sent in [Hello.protocol]. */
+        internal const val PROTOCOL_VERSION = 3
+
+        /** From this one on, a device asks its user before sending a diary, and says why if not. */
+        internal const val PROTOCOL_ASKS = 2
+
+        /** From this one on, syncs start by agreeing on key slots (and need the other side to). */
+        internal const val PROTOCOL_KEY_SLOTS = 3
 
         /** How long a question waits for the user: well under the other side's read timeout. */
         const val DECISION_TIMEOUT_MILLIS = 90_000L

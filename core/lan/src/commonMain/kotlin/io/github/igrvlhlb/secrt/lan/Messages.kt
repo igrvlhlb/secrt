@@ -22,7 +22,8 @@ internal data class Hello(
     /**
      * What this side's app understands, so either side can treat an older one cleanly. Versions
      * before it didn't send it (they read as 1, and ignore it): 2 asks before sending a diary and
-     * answers [Failure.Reason.SendDeclined] and [Failure.Reason.NoAnswer].
+     * answers [Failure.Reason.SendDeclined] and [Failure.Reason.NoAnswer]; 3 starts every sync
+     * with [KeySlots], and needs the other side to do the same.
      */
     val protocol: Int = 1,
 ) : LanMessage
@@ -39,8 +40,19 @@ internal data class Failure(val reason: Reason) : LanMessage {
 
         /** Nobody answered the question in time. Only sent to peers of [Hello.protocol] 2 and later. */
         NoAnswer,
+
+        /** The user turned down the sync, which would have changed this side's password. Protocol 3. */
+        KeySlotsDeclined,
     }
 }
+
+/**
+ * First message each way of a sync, right after the hellos: this side's `vault.key` (key slots
+ * only, no secrets in clear), so both agree on the newest (see [SyncExchange]).
+ */
+@Serializable
+@SerialName("keySlots")
+internal data class KeySlots(val vaultKey: String) : LanMessage
 
 @Serializable
 @SerialName("vector")
@@ -172,4 +184,5 @@ internal fun Failure.toException(peerName: String = "The other device"): LanExce
     Failure.Reason.Protocol -> LanException.Protocol("rejected by the other device")
     Failure.Reason.SendDeclined -> LanException.DeclinedThere("$peerName declined to send its diary.")
     Failure.Reason.NoAnswer -> LanException.DeclinedThere("Nobody answered on $peerName in time. Try again.")
+    Failure.Reason.KeySlotsDeclined -> LanException.DeclinedThere("$peerName declined: its password would have changed.")
 }

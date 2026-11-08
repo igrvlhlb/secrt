@@ -70,6 +70,7 @@ class LanSyncTest {
             cryptoProvider = { SodiumCrypto.create() },
             ioDispatcher = Dispatchers.IO,
             argon2Params = Argon2Params.Insecure,
+            deviceName = { name },
         )
 
         val lan = LanSync(
@@ -516,6 +517,135 @@ class LanSyncTest {
         val stranger = device("Stranger")
         stranger.session.restore(Buffer().also { phone.session.exportTo(it) }, Credential.Password("pw"))
         assertFailsWith<LanException.UnknownDevice> { stranger.lan.sync(peer) }
+    }
+
+    @Test
+    fun theNewestPasswordWinsWhicheverSideHasIt() = test {
+        sameDiaryOnBoth()
+        val hostAsked = mutableListOf<LanQuestion>()
+        val host = computer.listen(asked = hostAsked)
+        val phoneAsked = mutableListOf<LanQuestion>()
+        val ask: suspend (LanQuestion) -> Boolean = { phoneAsked += it; true }
+
+        // The computer's is newer: the phone (which connects) is asked, when pairing as when syncing.
+        computer.session.changePassword("pw", "from the computer")
+        assertIs<PairingResult.Paired>(phone.lan.pair(host.newCode(), ask))
+        val question = assertIs<LanQuestion.AdoptKeySlots>(phoneAsked.single())
+        assertEquals("Computer", question.peerName)
+        assertEquals("Computer", question.change.changedOn)
+        assertEquals(question.change, phone.session.keySlotsAdopted.value)
+        assertEquals(emptyList(), hostAsked)
+
+        // The phone's is newer: the computer (which listens) is asked. Changes go both ways after.
+        phone.session.changePassword("from the computer", "from the phone")
+        phone.store.saveEntry("p", draft("From the phone, later"))
+        computer.store.saveEntry("c", draft("From the computer, later"))
+        val steps = mutableListOf<LanProgress>()
+        assertEquals(SyncStats(received = 1, sent = 1), phone.lan.sync(phone.store.peers.all().single(), ask) { steps += it })
+        assertEquals("Phone", assertIs<LanQuestion.AdoptKeySlots>(hostAsked.single()).change.changedOn)
+        assertTrue(LanProgress.WaitingForAnswer in steps)
+        assertEquals(1, phoneAsked.size)
+
+        // Now they agree: nobody is asked.
+        assertEquals(SyncStats(0, 0), phone.lan.sync(phone.store.peers.all().single(), ask))
+        assertEquals(1, phoneAsked.size)
+        assertEquals(1, hostAsked.size)
+        for (device in listOf(phone, computer)) {
+            device.session.lock()
+            assertFailsWith<InvalidCredentialsException> { device.session.unlock("pw") }
+            assertFailsWith<InvalidCredentialsException> { device.session.unlock("from the computer") }
+            device.session.unlock("from the phone")
+        }
+    }
+
+    @Test
+    fun recoveryKeyChangesTravelWithSyncs() = test {
+        phone.session.create("pw", withRecoveryKey = true)
+        computer.session.restore(Buffer().also { phone.session.exportTo(it) }, Credential.Password("pw"))
+        val host = computer.listen()
+        phone.lan.pair(host.newCode())
+
+        val recoveryKey = phone.session.regenerateRecoveryKey()
+        phone.lan.sync(phone.store.peers.all().single())
+        computer.session.lock()
+        computer.session.unlockWithRecoveryKey(recoveryKey)
+
+        computer.session.removeRecoveryKey()
+        phone.lan.sync(phone.store.peers.all().single(), ask = { true })
+        assertFalse(phone.session.hasRecoveryKey())
+    }
+
+    @Test
+    fun decliningOnTheConnectingSideSyncsNothing() = test {
+        sameDiaryOnBoth()
+        val host = computer.listen()
+        phone.lan.pair(host.newCode())
+        computer.session.changePassword("pw", "new")
+        computer.store.saveEntry("c", draft("Computer, later"))
+        phone.store.saveEntry("p", draft("Phone, later"))
+        val failure = scope.async { host.events.first { it is LanHost.Event.Failed } }
+
+        val error = assertFailsWith<LanException.Declined> { phone.lan.sync(phone.store.peers.all().single(), ask = { false }) }
+        assertEquals("Not synced with Computer: this device keeps its password.", error.message)
+        assertEquals(LanHost.Event.Failed("Phone declined: its password would have changed."), failure.await())
+        // Not one change went either way, and the phone keeps its password.
+        assertTrue("Computer, later" !in phone.store.titles())
+        assertTrue("Phone, later" !in computer.store.titles())
+        assertNull(phone.session.keySlotsAdopted.value)
+        phone.session.lock()
+        phone.session.unlock("pw")
+    }
+
+    @Test
+    fun decliningOnTheListeningSideSyncsNothing() = test {
+        sameDiaryOnBoth()
+        val host = computer.listen(answer = false)
+        phone.lan.pair(host.newCode())
+        phone.session.changePassword("pw", "new")
+        computer.store.saveEntry("c", draft("Computer, later"))
+        phone.store.saveEntry("p", draft("Phone, later"))
+        val failure = scope.async { host.events.first { it is LanHost.Event.Failed } }
+
+        val error = assertFailsWith<LanException.DeclinedThere> { phone.lan.sync(phone.store.peers.all().single()) }
+        assertEquals("Computer declined: its password would have changed.", error.message)
+        assertEquals(LanHost.Event.Failed("Not synced with Phone: this device keeps its password."), failure.await())
+        assertTrue("Computer, later" !in phone.store.titles())
+        assertTrue("Phone, later" !in computer.store.titles())
+        computer.session.lock()
+        computer.session.unlock("pw")
+    }
+
+    @Test
+    fun olderVersionsFailCleanly() = test {
+        // Stand-ins for versions from before syncs agreed on key slots (2), and before asking (1).
+        sameDiaryOnBoth()
+        computer.lan.protocolVersion = 2
+        val host = computer.listen()
+        val hostFailure = scope.async { host.events.first { it is LanHost.Event.Failed } }
+        val error = assertFailsWith<LanException.Outdated> { phone.lan.pair(host.newCode()) }
+        assertEquals("Computer runs an older version of secrt. Update secrt on it and try again.", error.message)
+        // What it reads is a plain refusal.
+        assertTrue("rejected by the other device" in (hostFailure.await() as LanHost.Event.Failed).message)
+        assertEquals(emptyList(), phone.store.peers.all())
+
+        // The other way round: this side says why, and pairs with nothing.
+        computer.lan.protocolVersion = LanSync.PROTOCOL_VERSION
+        phone.lan.protocolVersion = 2
+        val peersBefore = computer.store.peers.all()
+        val refused = scope.async { host.events.first { it is LanHost.Event.Failed } }
+        assertFailsWith<LanException.Protocol> { phone.lan.pair(host.newCode()) }
+        assertEquals(LanHost.Event.Failed("Phone runs an older version of secrt. Update secrt on it to sync with this device."), refused.await())
+        assertEquals(peersBefore, computer.store.peers.all())
+
+        // A computer being set up by a version that doesn't read "declined" reasons still hears a refusal.
+        val oldComputer = device("Old computer")
+        oldComputer.lan.protocolVersion = 1
+        val joinHost = oldComputer.listen(joining = true)
+        val joinFailure = scope.async { joinHost.events.first { it is LanHost.Event.Failed } }
+        phone.lan.protocolVersion = LanSync.PROTOCOL_VERSION
+        assertFailsWith<LanException.Declined> { phone.lan.pair(joinHost.newCode(), ask = { false }) }
+        assertTrue("rejected by the other device" in (joinFailure.await() as LanHost.Event.Failed).message)
+        assertNull(oldComputer.lan.pendingJoin.value)
     }
 
     @Test

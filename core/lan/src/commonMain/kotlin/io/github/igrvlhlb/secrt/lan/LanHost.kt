@@ -171,9 +171,9 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
                     _events.tryEmit(Event.Failed("$peerName has no diary either: there's nothing to set this computer up from."))
                     return false
                 }
-                messages.send(Hello(lan.ownName(), deviceId = null, vaultId = null, LanSync.PROTOCOL_VERSION))
+                messages.send(Hello(lan.ownName(), deviceId = null, vaultId = null, lan.protocolVersion))
                 // Its user is asked before it sends anything (versions from before that just send).
-                if (hello.protocol >= LanSync.PROTOCOL_VERSION) _events.tryEmit(Event.WaitingForAnswer(peerName))
+                if (hello.protocol >= LanSync.PROTOCOL_ASKS) _events.tryEmit(Event.WaitingForAnswer(peerName))
                 val file = lan.receiveDiary(messages)
                 messages.send(Received)
                 lan.offerJoin(PendingJoin(file, requireNotNull(joinIdentitySeed).copyOf(), peerKey, peerName, hello.deviceId, peerAddresses = emptyList()))
@@ -195,7 +195,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
                     messages.send(Failure(Failure.Reason.Protocol))
                     return false
                 }
-                messages.send(Hello(lan.ownName(), store.deviceId, vaultId, LanSync.PROTOCOL_VERSION))
+                messages.send(Hello(lan.ownName(), store.deviceId, vaultId, lan.protocolVersion))
                 val answer = lan.decide(LanQuestion.SendDiary(peerName, peerAsked = true), ::ask)
                 if (answer != LanSync.Answer.Yes) {
                     lan.refuse(messages, answer, hello.protocol, Failure.Reason.SendDeclined, "Nothing was sent to $peerName.")
@@ -214,12 +214,18 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
                 _events.tryEmit(Event.Failed("$peerName holds a different diary, so it can't sync with this one."))
                 return false
             }
-            messages.send(Hello(lan.ownName(), store.deviceId, vaultId, LanSync.PROTOCOL_VERSION))
+            if (hello.protocol < LanSync.PROTOCOL_KEY_SLOTS) {
+                // It wouldn't agree on key slots (see LanSync.requireKeySlots); it reads this as a refusal.
+                messages.send(Failure(Failure.Reason.Protocol))
+                _events.tryEmit(Event.Failed("$peerName runs an older version of secrt. Update secrt on it to sync with this device."))
+                return false
+            }
+            messages.send(Hello(lan.ownName(), store.deviceId, vaultId, lan.protocolVersion))
             if (mode == ConnectionMode.Pair) {
                 store.peers.pair(peerKey, peerName, hello.deviceId, emptyList(), lan.now())
                 _events.tryEmit(Event.Paired(peerName))
             }
-            val stats = SyncExchange.run(messages, store, initiator = false)
+            val stats = SyncExchange.run(messages, store, initiator = false, KeySlotsTurn(lan, peerName, ::ask))
             store.peers.recordSync(peerKey, peerName, hello.deviceId, emptyList(), store.versionVector(), lan.now())
             _events.tryEmit(Event.Synced(peerName, stats))
         } catch (e: CancellationException) {

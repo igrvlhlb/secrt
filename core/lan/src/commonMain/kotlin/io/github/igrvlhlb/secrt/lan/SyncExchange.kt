@@ -8,7 +8,9 @@ import io.github.igrvlhlb.secrt.model.RecordType
 import io.github.igrvlhlb.secrt.model.Revision
 import io.github.igrvlhlb.secrt.model.SecrtJson
 import io.github.igrvlhlb.secrt.model.VersionVector
+import io.github.igrvlhlb.secrt.session.KeySlotsComparison
 import io.github.igrvlhlb.secrt.storage.DiaryStore
+import io.github.igrvlhlb.secrt.vault.InvalidVaultHeaderException
 
 /** What one sync changed. */
 data class SyncStats(
@@ -18,10 +20,27 @@ data class SyncStats(
     val sent: Int,
 )
 
+/** One side's part in agreeing on key slots at the start of a sync ([SyncExchange], step 0). */
+internal class KeySlotsTurn(
+    val lan: LanSync,
+    val peerName: String,
+    /** Asks this side's user, through [LanSync.decide]. */
+    val ask: suspend (LanQuestion) -> Boolean,
+    /** The other side is asking its user: this one waits for the answer. */
+    val onWaiting: () -> Unit = {},
+)
+
 /**
  * Two-way sync of one diary between two authenticated replicas, taking turns so neither side ever
  * waits on a full send buffer:
  *
+ * 0. Both send their `vault.key` (the initiator first) and agree on the newest key slots: the most
+ *    recent password or recovery-key change wins (see docs/security.md). The side whose key slots
+ *    are older asks its user whether to take the other's on; if they are the same (or neither is
+ *    stamped), nobody asks. A "no" ends the sync right here, before anything else is exchanged. A
+ *    yes takes them on once the sync completed, so an interrupted sync leaves the password as it
+ *    was (and asks again next time). Both copies travel inside the authenticated channel, which
+ *    only paired devices of this diary can open, and are checked against this diary's data key.
  * 1. Both exchange version vectors (the initiator first).
  * 2. The initiator sends the revisions the responder lacks, in batches; the responder asks for the
  *    attachments it lacks among those they reference, receives them, then applies the revisions.
@@ -38,14 +57,45 @@ internal object SyncExchange {
     private const val MAX_REVISIONS = 1_000_000
     private const val MAX_VECTOR_ENTRIES = 10_000
     private const val MAX_ID_LENGTH = 128
+    private const val MAX_KEY_SLOTS_CHARS = 64 * 1024
 
-    suspend fun run(channel: MessageChannel, store: DiaryStore, initiator: Boolean): SyncStats {
+    suspend fun run(channel: MessageChannel, store: DiaryStore, initiator: Boolean, keySlots: KeySlotsTurn): SyncStats {
+        val lan = keySlots.lan
+        val ownKeySlots = lan.ownKeySlots()
+        val theirKeySlots = if (initiator) {
+            channel.send(KeySlots(ownKeySlots))
+            channel.expect<KeySlots>().vaultKey
+        } else {
+            channel.expect<KeySlots>().vaultKey.also { channel.send(KeySlots(ownKeySlots)) }
+        }
+        val comparison = try {
+            if (theirKeySlots.length > MAX_KEY_SLOTS_CHARS) throw LanException.Protocol("key slots size")
+            lan.compareKeySlots(theirKeySlots)
+        } catch (e: InvalidVaultHeaderException) {
+            channel.send(Failure(Failure.Reason.Protocol))
+            throw LanException.Protocol("key slots of another diary", e)
+        }
+        val adopting = (comparison as? KeySlotsComparison.NewerThere)?.change
+        // Asked before reading on: the other side waits (for this side's vector, or after sending
+        // its own), so nothing it sent is left unread if this ends here.
+        val answer = adopting?.let { lan.decide(LanQuestion.AdoptKeySlots(keySlots.peerName, it), keySlots.ask) }
+        if (comparison == KeySlotsComparison.NewerHere) keySlots.onWaiting()
+        val declinedHere = "Not synced with ${keySlots.peerName}: this device keeps its password."
+
         val ownVector = store.versionVector()
         val theirVector = if (initiator) {
+            if (answer != null && answer != LanSync.Answer.Yes) {
+                lan.refuse(channel, answer, LanSync.PROTOCOL_KEY_SLOTS, Failure.Reason.KeySlotsDeclined, declinedHere)
+            }
             channel.send(Vector(ownVector))
             channel.expect<Vector>().versionVector
         } else {
-            channel.expect<Vector>().versionVector.also { channel.send(Vector(ownVector)) }
+            channel.expect<Vector>().versionVector.also {
+                if (answer != null && answer != LanSync.Answer.Yes) {
+                    lan.refuse(channel, answer, LanSync.PROTOCOL_KEY_SLOTS, Failure.Reason.KeySlotsDeclined, declinedHere)
+                }
+                channel.send(Vector(ownVector))
+            }
         }
         validate(theirVector)
 
@@ -64,6 +114,7 @@ internal object SyncExchange {
             channel.expect<Done>()
             channel.send(Done)
         }
+        if (adopting != null) lan.adoptKeySlots(adopting)
         return stats
     }
 
