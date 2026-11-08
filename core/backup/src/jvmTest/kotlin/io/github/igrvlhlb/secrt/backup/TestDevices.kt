@@ -20,7 +20,7 @@ import java.io.File
 import kotlin.test.assertIs
 
 /** One device: its own file system and database file (as in AppSessionTest). */
-class Device {
+class Device(val name: String? = null) {
     val fileSystem = FakeFileSystem()
     val dbFile: File = File.createTempFile("secrt-backup", ".db").apply { delete(); deleteOnExit() }
 
@@ -41,6 +41,7 @@ class Device {
         cryptoProvider = { SodiumCrypto.create() },
         ioDispatcher = Dispatchers.Default,
         argon2Params = Argon2Params.Insecure,
+        deviceName = { name },
     )
 
     val backup = CloudBackup(session)

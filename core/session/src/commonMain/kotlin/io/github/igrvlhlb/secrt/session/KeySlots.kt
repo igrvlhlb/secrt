@@ -14,7 +14,12 @@ class KeySlotsChange internal constructor(
     val changedAt: Long,
     internal val stamp: Hlc,
     internal val vaultKeyJson: String,
-)
+) {
+    /** The same change: the same key slots, whichever device or copy it was read from. */
+    override fun equals(other: Any?): Boolean = other is KeySlotsChange && other.vaultKeyJson == vaultKeyJson
+
+    override fun hashCode(): Int = vaultKeyJson.hashCode()
+}
 
 /** How another copy of this diary's `vault.key` compares with this device's ([AppSession.compareKeySlots]). */
 sealed interface KeySlotsComparison {

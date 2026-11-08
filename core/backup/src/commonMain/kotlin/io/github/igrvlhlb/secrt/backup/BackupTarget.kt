@@ -48,5 +48,12 @@ class BackupNetworkException(cause: Throwable) :
 
 class BackupServerException(message: String) : BackupException(message)
 
+/**
+ * The user turned down taking on the backup's newer password (or recovery key), so nothing was
+ * synced: [CloudBackup.pull] and [CloudBackup.sync] downloaded and uploaded nothing.
+ */
+class KeySlotsChangeDeclinedException :
+    BackupException("Nothing was synced: this device keeps its current password.")
+
 /** The target has no backup of the diary that was asked for. */
 class NoBackupFoundException(message: String = "No secrt backup was found there") : BackupException(message)

@@ -2,6 +2,7 @@ package io.github.igrvlhlb.secrt.backup
 
 import io.github.igrvlhlb.secrt.archive.CorruptArchiveException
 import io.github.igrvlhlb.secrt.archive.UnsupportedArchiveException
+import io.github.igrvlhlb.secrt.session.KeySlotsChange
 import io.github.igrvlhlb.secrt.session.SessionState
 import io.github.igrvlhlb.secrt.vault.Credential
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
@@ -39,7 +40,8 @@ class CloudBackupTest {
         assertEquals(2, pushed.uploaded)
         val vaultId = phone.backup.findDiaries(target).single()
         assertEquals(
-            setOf("manifest.json", "vault.key", "blobs/${photo.blobId}", "log/${phone.store.deviceId}-1.seg").map { "secrt/$vaultId/$it" }.toSet(),
+            setOf("manifest.json", "vault.key", "vault.key.sealed", "blobs/${photo.blobId}", "log/${phone.store.deviceId}-1.seg")
+                .map { "secrt/$vaultId/$it" }.toSet(),
             target.files.keys,
         )
         assertNotNull(phone.backup.lastBackupAt(target))
@@ -233,14 +235,163 @@ class CloudBackupTest {
         val changed = target.files.getValue(vaultKey).decodeToString()
 
         // The laptop never saw the change; its push must not bring the old password back.
+        val sealed = target.files.getValue("$vaultKey.sealed").toList()
         laptop.store.saveEntry("l", draft("from the laptop"))
         laptop.backup.push(target)
         assertEquals(changed, target.files.getValue(vaultKey).decodeToString())
+        assertEquals(sealed, target.files.getValue("$vaultKey.sealed").toList())
 
         val tablet = Device()
         assertFailsWith<InvalidCredentialsException> { tablet.restoreFrom(target, Credential.Password("pw")) }
         tablet.restoreFrom(target, Credential.Password("new password"))
         assertEquals(setOf("from the laptop"), tablet.store.titles())
+    }
+
+    /** The phone, and a laptop restored from its backup. */
+    private suspend fun phoneAndLaptop(): Pair<Device, Device> {
+        val phone = Device("Phone")
+        phone.session.create("pw", withRecoveryKey = false)
+        phone.store.saveEntry("e1", draft("first"))
+        phone.backup.push(target)
+        val laptop = Device("Laptop")
+        laptop.restoreFrom(target)
+        return phone to laptop
+    }
+
+    private fun vaultKeyPath() = target.files.keys.single { it.endsWith("/vault.key") }
+
+    @Test
+    fun theMostRecentPasswordWinsOnEveryDevice() = runTest {
+        val (phone, laptop) = phoneAndLaptop()
+        // Both change it before syncing; the laptop's change comes later.
+        phone.session.changePassword("pw", "A")
+        Thread.sleep(5)
+        laptop.session.changePassword("pw", "B")
+        val asked = mutableListOf<KeySlotsChange>()
+
+        // The backup holds neither yet: each one's sync uploads its own, newer than the backup's.
+        phone.backup.sync(target) { asked += it; true }
+        laptop.backup.sync(target) { asked += it; true }
+        assertEquals(emptyList(), asked)
+
+        // The phone's next sync finds the laptop's, newer: it asks, then takes it on.
+        laptop.store.saveEntry("l", draft("from the laptop"))
+        laptop.backup.push(target)
+        assertEquals(1, phone.backup.sync(target) { asked += it; true }.downloaded)
+        val change = asked.single()
+        assertEquals("Laptop", change.changedOn)
+        assertEquals(change, phone.session.keySlotsAdopted.value)
+        assertEquals(setOf("first", "from the laptop"), phone.store.titles())
+        // Taken on, not uploaded again; the laptop has nothing new to ask about.
+        val files = target.files.mapValues { it.value.toList() }
+        phone.backup.sync(target) { error("Nothing to ask") }
+        laptop.backup.sync(target) { error("Nothing to ask") }
+        assertEquals(files, target.files.mapValues { it.value.toList() })
+
+        for (device in listOf(phone, laptop)) {
+            device.session.lock()
+            assertFailsWith<InvalidCredentialsException> { device.session.unlock("A") }
+            device.session.unlock("B")
+        }
+        assertFailsWith<InvalidCredentialsException> { Device().restoreFrom(target, Credential.Password("A")) }
+        Device().restoreFrom(target, Credential.Password("B"))
+    }
+
+    @Test
+    fun recoveryKeyChangesTravelThroughTheBackupToo() = runTest {
+        val phone = Device("Phone")
+        phone.session.create("pw", withRecoveryKey = true)
+        phone.backup.push(target)
+        val laptop = Device("Laptop")
+        laptop.restoreFrom(target)
+
+        val recoveryKey = phone.session.regenerateRecoveryKey()
+        phone.backup.push(target)
+        laptop.backup.pull(target) { true }
+        laptop.session.lock()
+        laptop.session.unlockWithRecoveryKey(recoveryKey)
+    }
+
+    @Test
+    fun decliningTheNewerPasswordSyncsNothing() = runTest {
+        val (phone, laptop) = phoneAndLaptop()
+        laptop.session.changePassword("pw", "new")
+        laptop.store.saveEntry("l", draft("from the laptop"))
+        laptop.backup.push(target)
+        phone.store.saveEntry("p", draft("from the phone"))
+        val files = target.files.mapValues { it.value.toList() }
+
+        assertFailsWith<KeySlotsChangeDeclinedException> { phone.backup.sync(target) { false } }
+        assertFailsWith<KeySlotsChangeDeclinedException> { phone.backup.pull(target) { false } }
+        // Without a way to ask, the answer is no.
+        assertFailsWith<KeySlotsChangeDeclinedException> { phone.backup.pull(target) }
+        // Nothing went either way, and the phone keeps its password.
+        assertEquals(setOf("first", "from the phone"), phone.store.titles())
+        assertEquals(files, target.files.mapValues { it.value.toList() })
+        assertNull(phone.session.keySlotsAdopted.value)
+        phone.session.lock()
+        phone.session.unlock("pw")
+    }
+
+    @Test
+    fun onlyTheSealedVaultKeyIsTakenOn() = runTest {
+        val (phone, laptop) = phoneAndLaptop()
+        val oldPlain = target.files.getValue(vaultKeyPath())
+        laptop.session.changePassword("pw", "new")
+        laptop.backup.push(target)
+        val sealedPath = vaultKeyPath() + ".sealed"
+        val sealed = target.files.getValue(sealedPath)
+
+        // The server puts back a plain vault.key (an old one, or one it made): nobody asks about it.
+        val phoneNow = phone.session.vaultKeyJson()
+        target.files[vaultKeyPath()] = oldPlain
+        target.files.remove(sealedPath)
+        phone.backup.sync(target) { error("Nothing to ask") }
+        assertEquals(phoneNow, phone.session.vaultKeyJson())
+        // The laptop, with newer key slots, uploads them both again.
+        laptop.backup.push(target)
+        assertEquals(laptop.session.vaultKeyJson(), target.files.getValue(vaultKeyPath()).decodeToString())
+
+        // A damaged sealed copy, or another diary's, stops the pull before anything is asked or merged.
+        laptop.store.saveEntry("l", draft("from the laptop"))
+        laptop.backup.push(target)
+        target.files[sealedPath] = sealed.copyOf().also { it[it.size - 1] = (it[it.size - 1] + 1).toByte() }
+        assertFailsWith<CorruptArchiveException> { phone.backup.sync(target) { error("Must not ask") } }
+        val other = Device()
+        other.session.create("pw", withRecoveryKey = false)
+        val otherTarget = MemoryTarget()
+        other.backup.push(otherTarget)
+        target.files[sealedPath] = otherTarget.files.entries.single { it.key.endsWith("/vault.key.sealed") }.value
+        assertFailsWith<CorruptArchiveException> { phone.backup.pull(target) { error("Must not ask") } }
+        assertEquals(setOf("first"), phone.store.titles())
+
+        // The real one again: asked, and taken on.
+        target.files[sealedPath] = sealed
+        assertEquals(1, phone.backup.pull(target) { true }.downloaded)
+        phone.session.lock()
+        phone.session.unlock("new")
+    }
+
+    @Test
+    fun anOlderSealedCopyPutBackIsNotTakenOn() = runTest {
+        val (phone, laptop) = phoneAndLaptop()
+        phone.session.changePassword("pw", "A")
+        phone.backup.push(target)
+        val sealedPath = vaultKeyPath() + ".sealed"
+        val older = target.files.getValue(sealedPath)
+        laptop.backup.pull(target) { true }
+        laptop.session.changePassword("A", "B")
+        laptop.backup.push(target)
+        phone.backup.pull(target) { true }
+
+        // The server replays the sealed copy of "A": genuine, but older than what both have.
+        target.files[sealedPath] = older
+        phone.backup.sync(target) { error("Nothing to ask") }
+        laptop.backup.sync(target) { error("Nothing to ask") }
+        for (device in listOf(phone, laptop)) {
+            device.session.lock()
+            device.session.unlock("B")
+        }
     }
 
     @Test

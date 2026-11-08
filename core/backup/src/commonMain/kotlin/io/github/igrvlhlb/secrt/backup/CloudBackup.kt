@@ -9,10 +9,13 @@ import io.github.igrvlhlb.secrt.model.Revision
 import io.github.igrvlhlb.secrt.model.SecrtJson
 import io.github.igrvlhlb.secrt.model.VersionVector
 import io.github.igrvlhlb.secrt.session.AppSession
+import io.github.igrvlhlb.secrt.session.KeySlotsChange
+import io.github.igrvlhlb.secrt.session.KeySlotsComparison
 import io.github.igrvlhlb.secrt.session.OpenDiary
 import io.github.igrvlhlb.secrt.storage.BlobStore
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.vault.Credential
+import io.github.igrvlhlb.secrt.vault.InvalidVaultHeaderException
 import io.github.igrvlhlb.secrt.vault.VaultKeys
 import kotlinx.serialization.Serializable
 import kotlin.time.Clock
@@ -39,6 +42,8 @@ data class BackupResult(val downloaded: Int = 0, val uploaded: Int = 0, val miss
  * ```
  * secrt/<vaultId>/manifest.json          {"format":1,"vaultId":"…"}; plain
  * secrt/<vaultId>/vault.key              key slots, as on the devices; plain, no secrets in clear
+ * secrt/<vaultId>/vault.key.sealed       the same, sealed with the archive key (AAD = vault id +
+ *                                        file name): the copy other devices trust and take on
  * secrt/<vaultId>/log/<deviceId>-<n>.seg revisions, sealed like .secrt segments (archive key,
  *                                        AAD = vault id + "log/<deviceId>-<n>.seg")
  * secrt/<vaultId>/blobs/<blobId>         attachments, encrypted exactly as stored on the devices
@@ -49,6 +54,11 @@ data class BackupResult(val downloaded: Int = 0, val uploaded: Int = 0, val miss
  *
  * What this device knows about each target (what it holds, which segments were read) lives in the
  * encrypted database next to the target's credentials, never on the target.
+ *
+ * The most recent password or recovery-key change wins on every device (see docs/security.md):
+ * a push uploads this device's `vault.key` when its key slots are newer than the sealed copy's,
+ * and a pull or sync that finds newer ones there asks first (`confirmKeySlots`), then takes them
+ * on. The plain copy is never taken on: the server could put an old one back, or forge one.
  */
 class CloudBackup(
     private val session: AppSession,
@@ -77,17 +87,60 @@ class CloudBackup(
     suspend fun push(target: BackupTarget, onProgress: (BackupProgress) -> Unit = {}): BackupResult =
         session.withOpenDiary { BackupRun(it, target, onProgress).push() }
 
-    /** Downloads and merges the segments and attachments this device hasn't seen. */
-    suspend fun pull(target: BackupTarget, onProgress: (BackupProgress) -> Unit = {}): BackupResult =
-        session.withOpenDiary { BackupRun(it, target, onProgress).pull() }
+    /**
+     * Downloads and merges the segments and attachments this device hasn't seen.
+     *
+     * If the backup holds newer key slots (another device changed the password or recovery key),
+     * [confirmKeySlots] is asked first, before anything is downloaded: on yes they are taken on
+     * once the pull succeeds, and this device opens with them from its next unlock; on no nothing
+     * happens at all.
+     *
+     * @throws KeySlotsChangeDeclinedException if [confirmKeySlots] said no.
+     */
+    suspend fun pull(
+        target: BackupTarget,
+        onProgress: (BackupProgress) -> Unit = {},
+        confirmKeySlots: suspend (KeySlotsChange) -> Boolean = { false },
+    ): BackupResult {
+        val accepted = askAboutKeySlots(target, onProgress, confirmKeySlots)
+        return session.withOpenDiary { BackupRun(it, target, onProgress).pull(accepted) }
+    }
 
-    /** [pull] then [push]: afterwards this device and the backup hold the same revisions. */
-    suspend fun sync(target: BackupTarget, onProgress: (BackupProgress) -> Unit = {}): BackupResult =
-        session.withOpenDiary { diary ->
+    /**
+     * [pull] then [push]: afterwards this device and the backup hold the same revisions (and key
+     * slots). Asks [confirmKeySlots] as [pull] does; a no means neither happens.
+     *
+     * @throws KeySlotsChangeDeclinedException
+     */
+    suspend fun sync(
+        target: BackupTarget,
+        onProgress: (BackupProgress) -> Unit = {},
+        confirmKeySlots: suspend (KeySlotsChange) -> Boolean = { false },
+    ): BackupResult {
+        val accepted = askAboutKeySlots(target, onProgress, confirmKeySlots)
+        return session.withOpenDiary { diary ->
             val run = BackupRun(diary, target, onProgress)
-            val pulled = run.pull()
+            val pulled = run.pull(accepted)
             run.push().copy(downloaded = pulled.downloaded, missingAttachments = pulled.missingAttachments)
         }
+    }
+
+    /**
+     * Asks [confirm] about the backup's key slots if they are newer than this device's. Outside the
+     * session lock: the user may take a while, and the diary must be able to lock meanwhile (which
+     * ends the operation).
+     *
+     * @return the change the user accepted, or `null` if there was nothing to ask.
+     */
+    private suspend fun askAboutKeySlots(
+        target: BackupTarget,
+        onProgress: (BackupProgress) -> Unit,
+        confirm: suspend (KeySlotsChange) -> Boolean,
+    ): KeySlotsChange? {
+        val change = session.withOpenDiary { BackupRun(it, target, onProgress).newerKeySlots() } ?: return null
+        if (!confirm(change)) throw KeySlotsChangeDeclinedException()
+        return change
+    }
 
     // ---------------------------------------------------------------- first run
 
@@ -153,15 +206,62 @@ class CloudBackup(
         private val dir = vaultDir(diary.keys.vaultId)
         private val ownId = store.deviceId
 
-        suspend fun pull(): BackupResult {
+        /** The backup's key slots, if they are newer than this device's. */
+        suspend fun newerKeySlots(): KeySlotsChange? {
+            onProgress(BackupProgress(BackupProgress.Stage.Checking, 0, 0))
+            if (VAULT_KEY !in target.list(dir)) return null
+            checkManifest(target, dir, diary.keys.vaultId, createIfMissing = false)
+            return (sealedKeySlots() as? KeySlotsComparison.NewerThere)?.change
+        }
+
+        /** @param accepted the newer key slots the user agreed to take on, if any (see [askAboutKeySlots]). */
+        suspend fun pull(accepted: KeySlotsChange?): BackupResult {
             onProgress(BackupProgress(BackupProgress.Stage.Checking, 0, 0))
             // Nothing pushed there yet: nothing to pull either.
             if (VAULT_KEY !in target.list(dir)) return BackupResult()
             checkManifest(target, dir, diary.keys.vaultId, createIfMissing = false)
+            // Asked about before the session lock was taken: another device may have pushed since.
+            val newer = (sealedKeySlots() as? KeySlotsComparison.NewerThere)?.change
+            if (newer != null && newer != accepted) throw BackupException("The backup changed meanwhile. Try again.")
             val fetched = fetch(target, dir, diary.crypto, diary.keys, diary.blobs, store.loadState(target), onProgress)
             val added = store.applyRemote(fetched.revisions)
-            store.saveState(target, fetched.state)
+            var state = fetched.state
+            // Last, once everything else came through: a pull that fails leaves the password as it was.
+            if (newer != null && diary.adoptKeySlots(newer)) state = state.copy(uploadedVaultKey = diary.vaultKeyJson)
+            store.saveState(target, state)
             return BackupResult(downloaded = added, missingAttachments = fetched.missingAttachments)
+        }
+
+        /**
+         * How the backup's sealed copy of `vault.key` compares with this device's; `null` if it has
+         * none (pushed by versions from before it).
+         *
+         * @throws CorruptArchiveException if it was tampered with, or isn't this diary's.
+         */
+        private suspend fun sealedKeySlots(): KeySlotsComparison? {
+            val data = target.get(dir + VAULT_KEY_SEALED) ?: return null
+            val json = SecrtArchive.openFile(diary.crypto, diary.keys, VAULT_KEY_SEALED, data).decodeToString()
+            return try {
+                diary.compareKeySlots(json)
+            } catch (e: InvalidVaultHeaderException) {
+                throw CorruptArchiveException("$VAULT_KEY_SEALED doesn't belong to this diary", e)
+            }
+        }
+
+        /** Whether the backup should get this device's `vault.key`, given what it holds. */
+        private suspend fun vaultKeyOutdated(top: List<String>, state: BackupState): Boolean {
+            if (VAULT_KEY !in top) return true
+            sealedKeySlots()?.let { return it == KeySlotsComparison.NewerHere }
+            // Pushed by versions from before the sealed copy. This device's key slots are compared
+            // with the plain one (only to decide whether to replace it, never to take it on), or,
+            // if neither is stamped, the old rule applies: only if they changed *here*.
+            val plain = target.get(dir + VAULT_KEY)?.decodeToString()
+            val newerHere = plain != null && try {
+                diary.compareKeySlots(plain) == KeySlotsComparison.NewerHere
+            } catch (e: InvalidVaultHeaderException) {
+                true
+            }
+            return newerHere || state.uploadedVaultKey != null && state.uploadedVaultKey != diary.vaultKeyJson
         }
 
         suspend fun push(): BackupResult {
@@ -175,15 +275,19 @@ class CloudBackup(
                 state = BackupState()
             }
 
-            // vault.key. Every device has its own copy, so only upload it when it is missing or it
-            // changed *here* (password or recovery key): a device that merely never saw another
-            // device's change must not put the old one back.
+            // vault.key: only when it is missing or this device's key slots are newer than the
+            // backup's, so a device that merely never saw another device's password change can't
+            // put the old one back. In clear, for restoring on a new device, then sealed, the copy
+            // other devices trust. In that order: if the push stops in between, the sealed copy
+            // is still the older one, and the next push uploads both again.
+            val vaultKey = diary.vaultKeyJson
             when {
-                VAULT_KEY !in top || state.uploadedVaultKey != null && state.uploadedVaultKey != diary.vaultKeyJson -> {
-                    target.put(dir + VAULT_KEY, diary.vaultKeyJson.encodeToByteArray())
-                    state = state.copy(uploadedVaultKey = diary.vaultKeyJson)
+                vaultKeyOutdated(top, state) -> {
+                    target.put(dir + VAULT_KEY, vaultKey.encodeToByteArray())
+                    target.put(dir + VAULT_KEY_SEALED, SecrtArchive.sealFile(diary.crypto, diary.keys, VAULT_KEY_SEALED, vaultKey.encodeToByteArray()))
+                    state = state.copy(uploadedVaultKey = vaultKey)
                 }
-                state.uploadedVaultKey == null -> state = state.copy(uploadedVaultKey = diary.vaultKeyJson)
+                state.uploadedVaultKey == null -> state = state.copy(uploadedVaultKey = vaultKey)
             }
             store.saveState(target, state)
 
@@ -323,6 +427,7 @@ class CloudBackup(
         const val ROOT = "secrt/"
         const val MANIFEST = "manifest.json"
         const val VAULT_KEY = "vault.key"
+        const val VAULT_KEY_SEALED = "vault.key.sealed"
         const val LOG = "log/"
         const val BLOBS = "blobs/"
         const val SEGMENT_SUFFIX = ".seg"
