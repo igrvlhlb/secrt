@@ -61,4 +61,6 @@ kotlin {
 dependencies {
     implementation(projects.ui)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.play.services.auth)
+    implementation(libs.kotlinx.coroutines.play.services)
 }

@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
@@ -42,9 +43,16 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.igrvlhlb.secrt.backup.BackupProgress
 import io.github.igrvlhlb.secrt.backup.BackupResult
+import io.github.igrvlhlb.secrt.backup.BackupTargetConfig
+import io.github.igrvlhlb.secrt.backup.drive.GoogleSignIn
+import io.github.igrvlhlb.secrt.ui.AutoLock
+import io.github.igrvlhlb.secrt.ui.LocalAutoLock
 import io.github.igrvlhlb.secrt.ui.auth.PasswordField
 import io.github.igrvlhlb.secrt.ui.components.formatDateTime
 import io.github.igrvlhlb.secrt.ui.components.readableWidth
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /**
  * A screen over the current one. The backup screens are dialogs rather than navigation routes so
@@ -185,5 +193,41 @@ internal fun LabeledValue(label: String, value: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** Small explanatory text under a button. */
+@Composable
+internal fun Hint(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** Signs in to Google Drive, where the app supports it (see `SecrtApp`'s `google`). */
+val LocalGoogleSignIn = staticCompositionLocalOf<GoogleSignIn?> { null }
+
+/**
+ * [LocalGoogleSignIn], with auto-lock paused while it works: on Android, Google's account picker
+ * and consent screen put secrt in the background, which must not lock the diary.
+ */
+@Composable
+internal fun rememberGoogleSignIn(): GoogleSignIn? {
+    val google = LocalGoogleSignIn.current ?: return null
+    val autoLock = LocalAutoLock.current
+    return remember(google, autoLock) { PausingAutoLock(google, autoLock) }
+}
+
+private class PausingAutoLock(private val google: GoogleSignIn, private val autoLock: AutoLock) : GoogleSignIn {
+    override suspend fun signIn() = paused { google.signIn() }
+
+    override suspend fun accessToken(account: BackupTargetConfig.GoogleDrive, stale: String?) = paused { google.accessToken(account, stale) }
+
+    private suspend fun <T> paused(block: suspend () -> T): T {
+        // AutoLock is driven from the main thread.
+        withContext(Dispatchers.Main) { autoLock.pause() }
+        try {
+            return block()
+        } finally {
+            withContext(NonCancellable + Dispatchers.Main) { autoLock.resume() }
+        }
     }
 }

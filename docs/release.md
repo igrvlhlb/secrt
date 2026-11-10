@@ -70,3 +70,19 @@ back into the real ones (`retrace`). Keep that file for every release you ship.
 
 Raise `versionCode` (and `versionName`) in `app/android/build.gradle.kts` for every release:
 Play and F-Droid refuse a version code they already have.
+
+## Google Drive and the signing certificate
+
+Google lets an app sign in for Drive only if its package name and the SHA-1 of the certificate it
+was signed with match an Android OAuth client in secrt's Google Cloud project. Each certificate
+needs its own Android client (Google Auth Platform → Clients → Create client → Android, package
+`io.github.igrvlhlb.secrt`):
+
+| Certificate | Where to find its SHA-1 | Needed for |
+|---|---|---|
+| Debug key (this machine's `~/.android/debug.keystore`) | `keytool -list -v -keystore ~/.android/debug.keystore -storepass android` | `installDebug` |
+| Play's app signing key | Play Console → Test and release → App integrity → App signing | Installs from Play |
+| Your upload key | `keytool -list -v -keystore /path/to/upload-keystore.jks -alias secrt` | Signed release builds you install yourself |
+
+F-Droid builds don't use Google Play services (F-Droid takes no closed-source libraries), so they
+need another way to sign in to Google; see the backlog.

@@ -33,6 +33,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.igrvlhlb.secrt.backup.BackupProgress
 import io.github.igrvlhlb.secrt.backup.BackupTargetConfig
 import io.github.igrvlhlb.secrt.backup.CloudBackup
+import io.github.igrvlhlb.secrt.backup.drive.GoogleSignIn
 import io.github.igrvlhlb.secrt.backup.webdav.WebDavTarget
 import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.ui.auth.PasswordField
@@ -59,7 +60,8 @@ fun CloudRestoreButton(session: AppSession) {
         Text("Restore from cloud backup")
     }
     if (open) {
-        val vm = viewModel { CloudRestoreViewModel(session) }
+        val google = rememberGoogleSignIn()
+        val vm = viewModel { CloudRestoreViewModel(session, google) }
         CloudRestoreScreen(vm, onClose = { vm.reset(); open = false })
     }
 }
@@ -71,12 +73,16 @@ private fun CloudRestoreScreen(vm: CloudRestoreViewModel, onClose: () -> Unit) {
         when (val step = state.step) {
             Step.Server -> {
                 var fields by rememberServerFields()
+                if (vm.canUseGoogleDrive) {
+                    PrimaryButton("Find my diary in Google Drive", busy = state.busy && state.searchingGoogle, enabled = !state.busy, onClick = vm::findOnGoogleDrive)
+                    Hint("Or on your own server (WebDAV, Nextcloud):")
+                }
                 ServerForm(fields, { fields = it }, enabled = !state.busy, error = state.error) {
-                    PrimaryButton("Find my diary", busy = state.busy, enabled = fields.complete) { vm.findDiaries(fields) }
+                    PrimaryButton("Find my diary", busy = state.busy && !state.searchingGoogle, enabled = fields.complete && !state.busy) { vm.findDiaries(fields) }
                 }
             }
             is Step.ChooseDiary -> {
-                Text("This folder holds backups of several diaries. Which one should be restored?")
+                Text("There are backups of several diaries here. Which one should be restored?")
                 step.vaultIds.forEach { id ->
                     Card(Modifier.fillMaxWidth().clickable { vm.choose(id) }) {
                         ListItem(headlineContent = { Text("Diary ${id.take(8)}") }, supportingContent = { Text(id) })
@@ -93,9 +99,9 @@ private fun CloudRestoreScreen(vm: CloudRestoreViewModel, onClose: () -> Unit) {
                 }
                 Text(
                     if (useRecoveryKey) {
-                        "Enter the recovery key of the diary backed up at ${step.config.description}."
+                        "Enter the recovery key of the diary backed up in ${step.config.description}."
                     } else {
-                        "Enter the password of the diary backed up at ${step.config.description}. It's the password it had when it was last backed up."
+                        "Enter the password of the diary backed up in ${step.config.description}. It's the password it had when it was last backed up."
                     },
                 )
                 if (useRecoveryKey) {
@@ -135,11 +141,13 @@ internal sealed interface Step {
     data class Unlock(val config: BackupTargetConfig, val vaultId: String, val choices: List<String>) : Step
 }
 
-internal class CloudRestoreViewModel(session: AppSession) : ViewModel() {
+internal class CloudRestoreViewModel(session: AppSession, private val google: GoogleSignIn?) : ViewModel() {
 
     data class State(
         val step: Step = Step.Server,
         val busy: Boolean = false,
+        /** The search under way is in Google Drive (not on a WebDAV server). */
+        val searchingGoogle: Boolean = false,
         val error: String? = null,
         val progress: BackupProgress? = null,
     )
@@ -153,19 +161,33 @@ internal class CloudRestoreViewModel(session: AppSession) : ViewModel() {
 
     fun clearError() = _state.update { it.copy(error = null) }
 
-    fun findDiaries(fields: ServerFields) {
-        _state.update { it.copy(busy = true, error = null) }
+    val canUseGoogleDrive: Boolean get() = google != null
+
+    fun findDiaries(fields: ServerFields) = find(google = false) { WebDavTarget.connect(fields.url, fields.username.trim(), fields.password) }
+
+    /** Lets the user pick a Google account, then looks for backups in its Drive. */
+    fun findOnGoogleDrive() {
+        val google = google ?: return
+        find(google = true) { google.signIn() }
+    }
+
+    private fun find(google: Boolean, connect: suspend () -> BackupTargetConfig) {
+        _state.update { it.copy(busy = true, searchingGoogle = google, error = null) }
         viewModelScope.launch {
             try {
-                val config = WebDavTarget.connect(fields.url, fields.username.trim(), fields.password)
-                val ids = config.open().use { backup.findDiaries(it) }
+                val config = connect()
+                val ids = config.open(this@CloudRestoreViewModel.google).use { backup.findDiaries(it) }
                 val step = when (ids.size) {
                     0 -> null
                     1 -> Step.Unlock(config, ids.single(), ids)
                     else -> Step.ChooseDiary(config, ids)
                 }
                 _state.update {
-                    if (step == null) it.copy(error = "There's no secrt backup in this folder yet") else it.copy(step = step)
+                    if (step == null) {
+                        it.copy(error = if (google) "There's no secrt backup in the Google Drive of ${(config as BackupTargetConfig.GoogleDrive).account}" else "There's no secrt backup in this folder yet")
+                    } else {
+                        it.copy(step = step)
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -194,7 +216,7 @@ internal class CloudRestoreViewModel(session: AppSession) : ViewModel() {
         _state.update { it.copy(progress = BackupProgress(BackupProgress.Stage.Checking, 0, 0), error = null) }
         viewModelScope.launch {
             try {
-                step.config.open().use { target ->
+                step.config.open(google).use { target ->
                     backup.restore(target, step.vaultId, credential, step.config) { p -> _state.update { it.copy(progress = p) } }
                 }
                 // The diary is open now and this screen is about to go away.

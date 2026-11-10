@@ -18,6 +18,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.igrvlhlb.secrt.backup.drive.GoogleSignIn
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -34,6 +35,7 @@ import io.github.igrvlhlb.secrt.ui.auth.RestoreScreen
 import io.github.igrvlhlb.secrt.ui.auth.SetupScreen
 import io.github.igrvlhlb.secrt.ui.auth.UnlockScreen
 import io.github.igrvlhlb.secrt.ui.backup.CloudRestoreButton
+import io.github.igrvlhlb.secrt.ui.backup.LocalGoogleSignIn
 import io.github.igrvlhlb.secrt.ui.devices.DevicesScreen
 import io.github.igrvlhlb.secrt.ui.devices.JoinFromPhoneScreen
 import io.github.igrvlhlb.secrt.ui.devices.LocalOpenDevices
@@ -57,6 +59,7 @@ import kotlinx.serialization.Serializable
  * @param autoLock pass one that lives as long as [session] where the UI can be recreated while
  *   the diary stays open (Android activities); see [AutoLock].
  * @param lan pairing and sync with the user's other devices; `null` leaves it out.
+ * @param google signs in to Google Drive for cloud backup; `null` leaves Google Drive out.
  */
 @Composable
 fun SecrtApp(
@@ -64,6 +67,7 @@ fun SecrtApp(
     backgroundScope: CoroutineScope,
     autoLock: AutoLock = remember(session) { AutoLock(session, backgroundScope) },
     lan: LanSync? = null,
+    google: GoogleSignIn? = null,
 ) {
     SecrtTheme {
         Surface(Modifier.fillMaxSize()) {
@@ -90,7 +94,7 @@ fun SecrtApp(
             }
 
             // Provided before the diary exists too: the camera permission dialog pauses it.
-            CompositionLocalProvider(LocalAutoLock provides autoLock) {
+            CompositionLocalProvider(LocalAutoLock provides autoLock, LocalGoogleSignIn provides google) {
                 when (val s = state) {
                     SessionState.NoVault -> when (val backup = backupToRestore) {
                         // A computer can't scan: it shows a code, and the phone sends the diary.

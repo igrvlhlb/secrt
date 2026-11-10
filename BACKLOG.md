@@ -53,8 +53,17 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
       push / pull / sync, restore from cloud on first run, bookkeeping and credentials in the encrypted DB
 - [x] WebDAV target (home servers, NAS, Nextcloud; finds Nextcloud's folder from the server address)
 - [x] Settings → Cloud backup (connect, test, back up, sync, disconnect) and "Restore from cloud backup" on first run
-- [ ] Google Drive `appDataFolder` target. Needs an OAuth client ID that the user registers in Google
-      Cloud (and the OAuth flows: desktop loopback + PKCE, Android Authorization API)
+- [x] Google Drive `appDataFolder` target (like WhatsApp), with Google sign-in on Android
+      (Play services AuthorizationClient) and the desktop (browser, loopback + PKCE). Works on
+      Android against real Google; the desktop is off until a Desktop OAuth client is configured
+- [ ] Google Drive: "Disconnect" could also revoke secrt's access (today Google keeps the grant
+      until the user removes it under their Google account's third-party access)
+- [ ] Google Drive on a release build: register Play's app signing and the upload key's SHA-1s (docs/release.md)
+- [ ] F-Droid: a build flavor without Google Play services (F-Droid takes no closed-source
+      libraries); Drive sign-in there through the browser or not at all, to be decided
+- [ ] Flaky: `LanSyncTest.refusesToPairDifferentDiaries` once got `ConnectionLost` after 15 s instead
+      of `DifferentDiary` during a full `allTests` run (passes alone and on rerun); likely a race
+      between the host's failure message and closing the connection, under load
 - [ ] OneDrive, Dropbox, S3-compatible targets (the `BackupTarget` interface is all they need)
 - [ ] WebDAV: servers with self-signed certificates (trust a pinned certificate); today TLS must validate
 - [ ] Cloud backup: prune the backup (compact old segments, delete orphaned blobs); today it only grows

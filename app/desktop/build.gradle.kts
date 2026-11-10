@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
@@ -35,6 +36,37 @@ dependencies {
 tasks.test {
     javaLauncher = desktopRuntime
     jvmArgs(desktopJvmArgs)
+}
+
+/**
+ * The Google OAuth client ("Desktop app" type) for Google Drive backup, from `local.properties`
+ * (or `-P`): `secrt.google.desktopClientId` and `secrt.google.desktopClientSecret`. Its secret
+ * isn't really one (it ships in every copy of the app), but it stays out of the repository. Without
+ * them the app is built without Google Drive.
+ */
+val localProperties = providers.fileContents(rootProject.layout.projectDirectory.file("local.properties")).asText
+    .map { text -> Properties().apply { load(text.reader()) } }
+
+fun googleSetting(name: String): Provider<String> =
+    providers.gradleProperty(name).orElse(localProperties.map { it.getProperty(name).orEmpty() }).orElse("")
+
+val generateGoogleConfig = tasks.register("generateGoogleConfig") {
+    val clientId = googleSetting("secrt.google.desktopClientId")
+    val clientSecret = googleSetting("secrt.google.desktopClientSecret")
+    val output = layout.buildDirectory.dir("generated/googleConfig")
+    inputs.property("clientId", clientId)
+    inputs.property("clientSecret", clientSecret)
+    outputs.dir(output)
+    doLast {
+        output.get().file("secrt-google.properties").asFile.apply {
+            parentFile.mkdirs()
+            writeText("desktopClientId=${clientId.get()}\ndesktopClientSecret=${clientSecret.get()}\n")
+        }
+    }
+}
+
+sourceSets.main {
+    resources.srcDir(generateGoogleConfig)
 }
 
 // So `./gradlew jvmTest` also runs this module's tests, like the multiplatform modules' JVM tests.

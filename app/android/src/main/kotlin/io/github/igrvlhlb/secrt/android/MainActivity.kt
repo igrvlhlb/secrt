@@ -18,8 +18,9 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
         val app = application as SecrtApplication
         app.biometrics.attach(this)
+        app.google.attach(this)
         DebugHooks.handle(intent, app.lan)
-        setContent { SecrtApp(app.session, app.backgroundScope, app.autoLock, app.lan) }
+        setContent { SecrtApp(app.session, app.backgroundScope, app.autoLock, app.lan, app.google) }
     }
 
     override fun onNewIntent(intent: Intent) {
