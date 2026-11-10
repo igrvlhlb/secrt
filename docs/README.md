@@ -12,6 +12,7 @@ Read in this order:
 | [history-and-sync.md](history-and-sync.md) | How every change is recorded, how devices exchange changes, and how concurrent edits are merged (with and without conflicts). |
 | [security.md](security.md) | Keys, passwords, the recovery key, biometric unlock, what is encrypted where, and the threat model. |
 | [architecture.md](architecture.md) | The design reference: the decisions taken, file and wire formats (`.secrt`, cloud layout, LAN protocol), schema migrations, roadmap. |
+| [release.md](release.md) | Building and signing the Android release for Google Play and F-Droid, and the Google sign-in certificates. |
 
 Pending work is tracked in [../BACKLOG.md](../BACKLOG.md).
 
