@@ -39,6 +39,7 @@ fun main() {
     }
     val session = desktopSession(dataDirectory)
     val lan = desktopLanSync(session, dataDirectory)
+    val google = desktopGoogleSignIn()
     val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     integrateWithDesktop(session)
 
@@ -53,7 +54,7 @@ fun main() {
             ) {
                 // Narrower than this, the phone layout starts to clip.
                 LaunchedEffect(Unit) { window.minimumSize = Dimension(400, 560) }
-                SecrtApp(session, backgroundScope, lan = lan)
+                SecrtApp(session, backgroundScope, lan = lan, google = google)
             }
         } else {
             LaunchedEffect(Unit) {

@@ -8,7 +8,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.core.session)
-            implementation(projects.core.backup)
+            api(projects.core.backup)
             api(projects.core.lan)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)

@@ -5,7 +5,7 @@
 | Threat | Protection |
 |---|---|
 | Someone gets the phone or laptop (lost, stolen, seized) while the diary is locked | Everything is encrypted at rest. Without the password, recovery key or enrolled fingerprint, they only get ciphertext and must guess the password offline against Argon2id |
-| The cloud provider, or anyone with access to the backup | The backup holds only encrypted files and `vault.key`. Nothing is readable, not even titles or folder names. Tampered files are rejected |
+| The cloud provider (Google, a WebDAV host), or anyone with access to the backup | The backup holds only encrypted files and `vault.key`. Nothing is readable, not even titles or folder names. Tampered files are rejected. Google Drive access is limited to secrt's own hidden folder: secrt can't see the user's other files |
 | Someone on the same Wi-Fi | LAN traffic is encrypted and authenticated with fresh keys per connection. Unpaired devices are refused, and pairing needs a one-time secret from a QR code on the other device's screen |
 | A stolen `.secrt` export file | Same as a backup: encrypted, and opens only with the password or recovery key |
 | Screenshots and the app switcher (Android) | `FLAG_SECURE` hides the app's content |

@@ -54,6 +54,9 @@ class SecrtApplication : Application() {
     private fun deviceName(): String =
         Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() } ?: Build.MODEL
 
+    /** Google Drive backup: Google's screens are shown from the current activity. */
+    val google: AndroidGoogleSignIn by lazy { AndroidGoogleSignIn(this) }
+
     /** Per process, not per activity: its timer must survive the activity being recreated or closed. */
     val autoLock: AutoLock by lazy { AutoLock(session, backgroundScope) }
 }

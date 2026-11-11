@@ -177,9 +177,37 @@ secrt/<vaultId>/
      depth 1 / `GET` / `PUT` / `MKCOL` / `DELETE`. Given a bare server address it also tries
      Nextcloud/ownCloud's `/remote.php/dav/files/<user>/`; connecting writes and deletes a probe
      file. Plain `http://` works but the UI warns that the server password is then unprotected.
-  2. Google Drive `appDataFolder` (scope `drive.appdata`, like WhatsApp); needs an OAuth client ID.
+  2. Google Drive (done, `GoogleDriveTarget`), the way WhatsApp backs up: Drive's hidden
+     `appDataFolder`, which only secrt can open (the user sees its size, and can delete it, under
+     Drive › Settings › Manage apps). Scopes: `drive.appdata` and `userinfo.email` (to show the
+     account), both "non-sensitive", so Google needs no app review. Drive v3 REST over Ktor:
+     - Drive has ids, not paths: each file is stored flat under its whole path as its name
+       (`secrt/<vaultId>/log/<deviceId>-<n>.seg`), and folders are derived from names. The file list
+       is read once per target instance (one per operation) and updated as it writes.
+     - Drive allows two files with one name. Two devices creating a shared file at once
+       (`vault.key`, `manifest.json`) leave two copies: reads take the newest, the next write
+       deletes the others.
+     - Uploads: multipart (create) or media (update) up to 5 MB, resumable above.
+     - A refused token (401) is replaced once; 429, 5xx and rate-limit 403s are retried with growing
+       waits; a full Drive and a disabled Drive API have their own messages.
   3. Later: OneDrive (Graph `approot`), Dropbox app folder, S3-compatible.
-- OAuth: desktop loopback redirect + PKCE; Android Credential Manager/Authorization API; iOS ASWebAuthenticationSession.
+- **Google sign-in** (`GoogleSignIn`, one per platform, handed to `SecrtApp`; without one the app
+  doesn't offer Google Drive):
+  - Android (`AndroidGoogleSignIn`): Google Play services' `AuthorizationClient`. It shows the
+    account picker and consent screen, keeps the grant, and hands out one-hour access tokens, so
+    secrt stores only the account's email. Google recognises the app by package name and signing
+    certificate (an "Android" OAuth client in Google Cloud), so no client ID ships in it. Auto-lock
+    is paused while Google's screens are in front.
+  - Desktop (`DesktopGoogleSignIn`): OAuth for installed apps with a loopback redirect and PKCE:
+    the browser opens Google's consent page, which redirects to a one-off server on `127.0.0.1`. The
+    refresh token is kept in the target's settings, in the encrypted database; access tokens only in
+    memory. The "Desktop app" OAuth client's id and secret come from `local.properties`
+    (`secrt.google.desktopClientId`, `secrt.google.desktopClientSecret`) at build time; that
+    secret isn't confidential (it ships in every copy), PKCE is what protects the code.
+  - The Google Cloud project must have the Drive API enabled and its OAuth consent screen
+    published ("In production"): while "Testing", Google expires refresh tokens after 7 days, so
+    the desktop would have to sign in again every week.
+  - Later, iOS: ASWebAuthenticationSession.
 - Plaintext export: zip of `<folder path>/<date>-<title>.md` with YAML front-matter (id, dates, labels), plus `_attachments/` linked relatively.
 
 ## LAN pairing & sync (`core:lan`, `ui/devices`)
