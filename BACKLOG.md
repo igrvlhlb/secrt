@@ -112,7 +112,10 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] UI tests (Compose) and an on-device test that the SQLCipher file holds no plaintext (the JVM
       driver already has one)
 - [ ] CI (build + `allTests`)
-- [ ] Release build: R8 rules for JNA/libsodium, SQLCipher and Ktor/OkHttp, signing
+- [x] Release signing from Gradle properties (docs/release.md); unsigned without them, for F-Droid
+- [x] Release build shrunk with R8; keep rules for JNA/libsodium (docs/release.md). Tried on the phone:
+      create, unlock (password, recovery key), write, search, export/import, pairing QR and scanner
+- [ ] Release build: try LAN pairing and sync between a shrunk build and another device
 - [x] Settings "About your data" reworded now that cloud backup and LAN sync exist (both opt-in)
 - [ ] Randomized convergence test: several replicas editing and syncing in random orders must end identical
 - [x] Database schema migrations: version-1 snapshot, `verifyMigrations`, upgrade test (see docs/architecture.md)
