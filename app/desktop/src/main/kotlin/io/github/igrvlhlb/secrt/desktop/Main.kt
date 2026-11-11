@@ -13,6 +13,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import io.github.igrvlhlb.secrt.session.AppSession
+import io.github.igrvlhlb.secrt.ui.DesktopTexts
 import io.github.igrvlhlb.secrt.ui.SecrtApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,7 +35,7 @@ import kotlin.system.exitProcess
 fun main() {
     val dataDirectory = dataDirectory()
     val instanceLock = lockDataDirectory(dataDirectory) ?: run {
-        JOptionPane.showMessageDialog(null, "secrt is already open.", "secrt", JOptionPane.INFORMATION_MESSAGE)
+        JOptionPane.showMessageDialog(null, runBlocking { DesktopTexts.alreadyOpen() }, "secrt", JOptionPane.INFORMATION_MESSAGE)
         exitProcess(1)
     }
     val session = desktopSession(dataDirectory)

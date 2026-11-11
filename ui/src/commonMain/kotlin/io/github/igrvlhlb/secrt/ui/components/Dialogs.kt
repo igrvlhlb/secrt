@@ -44,7 +44,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import io.github.igrvlhlb.secrt.model.Folder
 import io.github.igrvlhlb.secrt.model.Label
+import io.github.igrvlhlb.secrt.ui.resources.*
 import kotlinx.datetime.LocalDate
+import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun ConfirmDialog(
@@ -64,7 +66,7 @@ fun ConfirmDialog(
                 Text(confirmLabel, color = if (destructive) MaterialTheme.colorScheme.error else Color.Unspecified)
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_cancel)) } },
     )
 }
 
@@ -75,7 +77,7 @@ fun TextInputDialog(
     confirmLabel: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
-    label: String = "Name",
+    label: String = stringResource(Res.string.name_label),
 ) {
     var value by remember { mutableStateOf(initial) }
     AlertDialog(
@@ -85,7 +87,7 @@ fun TextInputDialog(
         confirmButton = {
             TextButton(enabled = value.isNotBlank(), onClick = { onConfirm(value.trim()); onDismiss() }) { Text(confirmLabel) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_cancel)) } },
     )
 }
 
@@ -98,9 +100,9 @@ fun DiaryDatePickerDialog(initial: LocalDate, onPick: (LocalDate) -> Unit, onDis
             TextButton(onClick = {
                 state.selectedDateMillis?.let { onPick(localDateFromPickerMillis(it)) }
                 onDismiss()
-            }) { Text("OK") }
+            }) { Text(stringResource(Res.string.action_ok)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_cancel)) } },
     ) {
         DatePicker(state = state)
     }
@@ -122,14 +124,14 @@ fun FolderPickerDialog(
         title = { Text(title) },
         text = {
             LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                item { PickerRow(Icons.Outlined.Home, "Top level", depth = 0, checked = selected == null) { onPick(null); onDismiss() } }
+                item { PickerRow(Icons.Outlined.Home, stringResource(Res.string.folders_top_level), depth = 0, checked = selected == null) { onPick(null); onDismiss() } }
                 items(rows, key = { it.first.id }) { (folder, depth) ->
                     PickerRow(Icons.Outlined.Folder, folder.name, depth + 1, checked = folder.id == selected) { onPick(folder.id); onDismiss() }
                 }
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_cancel)) } },
     )
 }
 
@@ -142,7 +144,7 @@ private fun PickerRow(icon: androidx.compose.ui.graphics.vector.ImageVector, tex
         Icon(icon, contentDescription = null)
         Spacer(Modifier.width(12.dp))
         Text(text, Modifier.weight(1f))
-        if (checked) Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+        if (checked) Icon(Icons.Default.Check, contentDescription = stringResource(Res.string.selected), tint = MaterialTheme.colorScheme.primary)
     }
 }
 
@@ -157,7 +159,7 @@ fun LabelPickerDialog(
     var newName by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Labels") },
+        title = { Text(stringResource(Res.string.tab_labels)) },
         text = {
             Column {
                 LazyColumn(Modifier.heightIn(max = 320.dp)) {
@@ -177,17 +179,17 @@ fun LabelPickerDialog(
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },
-                        label = { Text("New label") },
+                        label = { Text(stringResource(Res.string.labels_new)) },
                         singleLine = true,
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(enabled = newName.isNotBlank(), onClick = { onCreate(newName.trim()); newName = "" }) {
-                        Icon(Icons.Default.Add, contentDescription = "Create label")
+                        Icon(Icons.Default.Add, contentDescription = stringResource(Res.string.labels_create))
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_done)) } },
     )
 }
 
@@ -206,7 +208,7 @@ fun LabelEditDialog(
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true)
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(stringResource(Res.string.name_label)) }, singleLine = true)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     LabelPalette.forEach { c ->
                         Box(
@@ -219,9 +221,9 @@ fun LabelEditDialog(
             }
         },
         confirmButton = {
-            TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim(), color); onDismiss() }) { Text("Save") }
+            TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim(), color); onDismiss() }) { Text(stringResource(Res.string.action_save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_cancel)) } },
     )
 }
 

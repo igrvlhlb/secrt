@@ -15,6 +15,10 @@ import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.storage.EntryDraft
 import io.github.igrvlhlb.secrt.ui.components.today
 import io.github.igrvlhlb.secrt.ui.platform.PickedFile
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.text
+import io.github.igrvlhlb.secrt.ui.text.toUiText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -65,7 +69,7 @@ class EditorViewModel(
         private set
     var notFound by mutableStateOf(false)
         private set
-    var message by mutableStateOf<String?>(null)
+    var message by mutableStateOf<UiText?>(null)
 
     /** Decoded image attachments, by blob id. */
     val images = mutableStateMapOf<String, ImageBitmap>()
@@ -116,7 +120,7 @@ class EditorViewModel(
                 val ref = store.addAttachment(file.bytes, file.name, file.mimeType)
                 update { it.copy(attachments = (it.attachments + ref).distinctBy { a -> a.blobId }) }
             } catch (e: Exception) {
-                message = e.message ?: "Couldn't attach ${file.name}"
+                message = e.toUiText(text(Res.string.editor_attach_failed, file.name))
             }
         }
     }
@@ -130,7 +134,7 @@ class EditorViewModel(
                 val bytes = store.readAttachment(blobId)
                 images[blobId] = withContext(Dispatchers.Default) { bytes.decodeToImageBitmap() }
             } catch (e: Exception) {
-                message = "Couldn't open an attachment"
+                message = text(Res.string.editor_open_attachment_failed)
             }
         }
     }
@@ -155,7 +159,7 @@ class EditorViewModel(
             if (current.conflict != null && state === current) state = current.copy(conflict = null)
         } catch (e: Exception) {
             dirty = true
-            message = e.message ?: "Couldn't save"
+            message = e.toUiText(Res.string.editor_save_failed)
         }
     }
 

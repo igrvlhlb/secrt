@@ -85,7 +85,11 @@ import io.github.igrvlhlb.secrt.ui.components.longFormat
 import io.github.igrvlhlb.secrt.ui.components.pathTo
 import io.github.igrvlhlb.secrt.ui.components.readableWidth
 import io.github.igrvlhlb.secrt.ui.platform.rememberFilePicker
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.resolve
+import io.github.igrvlhlb.secrt.ui.text.text
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 private enum class EditorDialog { Date, Folder, Labels, Delete }
 
@@ -103,7 +107,7 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
 
     val pickFile = rememberFilePicker { result ->
         autoLock.resume()
-        result?.onSuccess(vm::addAttachment)?.onFailure { vm.message = it.message ?: "Couldn't read the file" }
+        result?.onSuccess(vm::addAttachment)?.onFailure { vm.message = text(Res.string.editor_read_failed) }
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.flush() }
@@ -112,7 +116,7 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
     LaunchedEffect(vm.notFound) { if (vm.notFound) onClose() }
     LaunchedEffect(vm.message) {
         vm.message?.let {
-            snackbar.showSnackbar(it)
+            snackbar.showSnackbar(it.resolve())
             vm.message = null
         }
     }
@@ -122,16 +126,16 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
         topBar = {
             TopAppBar(
                 title = { Text(state?.diaryDate?.longFormat().orEmpty()) },
-                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.action_back)) } },
                 actions = {
                     IconButton(onClick = { preview = !preview }) {
-                        Icon(if (preview) Icons.Outlined.Edit else Icons.Outlined.Visibility, if (preview) "Edit" else "Preview")
+                        Icon(if (preview) Icons.Outlined.Edit else Icons.Outlined.Visibility, stringResource(if (preview) Res.string.editor_edit else Res.string.editor_preview))
                     }
                     Box {
-                        IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "More") }
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, stringResource(Res.string.editor_more)) }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                             DropdownMenuItem(
-                                text = { Text("Delete entry") },
+                                text = { Text(stringResource(Res.string.editor_delete_entry)) },
                                 leadingIcon = { Icon(Icons.Outlined.Delete, null) },
                                 onClick = { menu = false; dialog = EditorDialog.Delete },
                             )
@@ -154,7 +158,7 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
             BorderlessField(
                 value = state.title,
                 onValueChange = { title -> vm.update { it.copy(title = title) } },
-                placeholder = "Title",
+                placeholder = stringResource(Res.string.editor_title),
                 textStyle = MaterialTheme.typography.headlineSmall,
                 singleLine = true,
                 readOnly = preview,
@@ -168,12 +172,12 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
                 )
                 AssistChip(
                     onClick = { dialog = EditorDialog.Folder },
-                    label = { Text(pathTo(state.folderId, folders).joinToString(" / ") { it.name }.ifEmpty { "No folder" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    label = { Text(pathTo(state.folderId, folders).joinToString(" / ") { it.name }.ifEmpty { stringResource(Res.string.editor_no_folder) }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     leadingIcon = { Icon(Icons.Outlined.Folder, null, Modifier.size(18.dp)) },
                 )
                 AssistChip(
                     onClick = { autoLock.pause(); pickFile() },
-                    label = { Text("Attach") },
+                    label = { Text(stringResource(Res.string.editor_attach)) },
                     leadingIcon = { Icon(Icons.Outlined.AttachFile, null, Modifier.size(18.dp)) },
                 )
             }
@@ -185,12 +189,12 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
                         onClick = { vm.update { it.copy(labelIds = it.labelIds - label.id) } },
                         label = { Text(label.name) },
                         leadingIcon = { ColorDot(label.color) },
-                        trailingIcon = { Icon(Icons.Outlined.Close, "Remove label", Modifier.size(16.dp)) },
+                        trailingIcon = { Icon(Icons.Outlined.Close, stringResource(Res.string.editor_remove_label), Modifier.size(16.dp)) },
                     )
                 }
                 AssistChip(
                     onClick = { dialog = EditorDialog.Labels },
-                    label = { Text("Labels") },
+                    label = { Text(stringResource(Res.string.tab_labels)) },
                     leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Label, null, Modifier.size(18.dp)) },
                 )
             }
@@ -201,7 +205,7 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
 
             if (preview) {
                 if (state.body.isBlank()) {
-                    Text("Nothing written yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(Res.string.editor_nothing_written), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     Markdown(content = state.body, modifier = Modifier.fillMaxWidth().padding(bottom = 32.dp))
                 }
@@ -209,7 +213,7 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
                 BorderlessField(
                     value = state.body,
                     onValueChange = { body -> vm.update { it.copy(body = body) } },
-                    placeholder = "Dear diary…  (Markdown supported)",
+                    placeholder = stringResource(Res.string.editor_body_placeholder),
                     textStyle = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.heightIn(min = 320.dp),
                 )
@@ -220,7 +224,7 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
     when (dialog) {
         null -> Unit
         EditorDialog.Date -> DiaryDatePickerDialog(state!!.diaryDate, { date -> vm.update { it.copy(diaryDate = date) } }, { dialog = null })
-        EditorDialog.Folder -> FolderPickerDialog("Folder", folders, state!!.folderId, { id -> vm.update { it.copy(folderId = id) } }, { dialog = null })
+        EditorDialog.Folder -> FolderPickerDialog(stringResource(Res.string.editor_folder), folders, state!!.folderId, { id -> vm.update { it.copy(folderId = id) } }, { dialog = null })
         EditorDialog.Labels -> LabelPickerDialog(
             labels = labels,
             selected = state!!.labelIds,
@@ -234,9 +238,9 @@ fun EditorScreen(vm: EditorViewModel, store: DiaryStore, autoLock: AutoLock, onC
             onDismiss = { dialog = null },
         )
         EditorDialog.Delete -> ConfirmDialog(
-            title = "Delete this entry?",
-            text = "This can't be undone.",
-            confirmLabel = "Delete",
+            title = stringResource(Res.string.editor_delete_title),
+            text = stringResource(Res.string.editor_delete_text),
+            confirmLabel = stringResource(Res.string.action_delete),
             destructive = true,
             onConfirm = { scope.launch { vm.delete(); onClose() } },
             onDismiss = { dialog = null },
@@ -279,19 +283,16 @@ private fun ConflictBanner(kind: ConflictKind, onKeep: () -> Unit) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Icon(Icons.Outlined.WarningAmber, null)
-                Text("Conflicting versions", style = MaterialTheme.typography.titleSmall)
+                Text(stringResource(Res.string.editor_conflict_title), style = MaterialTheme.typography.titleSmall)
             }
             Text(
                 when (kind) {
-                    ConflictKind.CONCURRENT_EDIT ->
-                        "This entry was changed on two devices at the same time. You're seeing the most recent " +
-                            "version; editing it makes it the final one."
-                    ConflictKind.EDITED_AFTER_DELETE ->
-                        "This entry was deleted on another device but edited on this one, so it was kept."
+                    ConflictKind.CONCURRENT_EDIT -> stringResource(Res.string.editor_conflict_concurrent)
+                    ConflictKind.EDITED_AFTER_DELETE -> stringResource(Res.string.editor_conflict_deleted)
                 },
                 style = MaterialTheme.typography.bodySmall,
             )
-            TextButton(onClick = onKeep) { Text("Keep this version") }
+            TextButton(onClick = onKeep) { Text(stringResource(Res.string.editor_keep_version)) }
         }
     }
 }
@@ -328,7 +329,7 @@ private fun Attachments(attachments: List<AttachmentRef>, vm: EditorViewModel, o
                 IconButton(onClick = { onRemove(attachment) }, modifier = Modifier.align(Alignment.TopEnd).size(28.dp)) {
                     Icon(
                         Icons.Outlined.Close,
-                        "Remove attachment",
+                        stringResource(Res.string.editor_remove_attachment),
                         tint = Color.White,
                         modifier = Modifier.background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(50)).padding(2.dp),
                     )

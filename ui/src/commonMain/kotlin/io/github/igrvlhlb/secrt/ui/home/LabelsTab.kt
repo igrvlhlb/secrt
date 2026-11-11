@@ -37,7 +37,9 @@ import io.github.igrvlhlb.secrt.ui.components.ColorDot
 import io.github.igrvlhlb.secrt.ui.components.ConfirmDialog
 import io.github.igrvlhlb.secrt.ui.components.LabelEditDialog
 import io.github.igrvlhlb.secrt.ui.components.LabelPalette
+import io.github.igrvlhlb.secrt.ui.resources.*
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun LabelsTab(store: DiaryStore) {
@@ -48,12 +50,12 @@ fun LabelsTab(store: DiaryStore) {
     val scope = rememberCoroutineScope()
 
     TabScaffold(
-        topBar = { TopAppBar(title = { Text("Labels") }) },
-        fab = { FloatingActionButton(onClick = { creating = true }) { Icon(Icons.Outlined.NewLabel, "New label") } },
+        topBar = { TopAppBar(title = { Text(stringResource(Res.string.tab_labels)) }) },
+        fab = { FloatingActionButton(onClick = { creating = true }) { Icon(Icons.Outlined.NewLabel, stringResource(Res.string.labels_new)) } },
     ) { modifier ->
         if (labels.isEmpty()) {
             Box(modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-                Text("Labels tag entries across folders, like \"travel\" or \"family\".", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(Res.string.labels_empty), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -63,7 +65,7 @@ fun LabelsTab(store: DiaryStore) {
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             leadingContent = { ColorDot(label.color, size = 20) },
                             headlineContent = { Text(label.name) },
-                            trailingContent = { IconButton(onClick = { deleting = label }) { Icon(Icons.Outlined.Delete, "Delete label") } },
+                            trailingContent = { IconButton(onClick = { deleting = label }) { Icon(Icons.Outlined.Delete, stringResource(Res.string.labels_delete)) } },
                         )
                     }
                 }
@@ -72,16 +74,16 @@ fun LabelsTab(store: DiaryStore) {
     }
 
     if (creating) {
-        LabelEditDialog("New label", "", LabelPalette[labels.size % LabelPalette.size], { name, color -> scope.launch { store.createLabel(name, color) } }, { creating = false })
+        LabelEditDialog(stringResource(Res.string.labels_new), "", LabelPalette[labels.size % LabelPalette.size], { name, color -> scope.launch { store.createLabel(name, color) } }, { creating = false })
     }
     editing?.let { label ->
-        LabelEditDialog("Edit label", label.name, label.color, { name, color -> scope.launch { store.updateLabel(label.id, name, color) } }, { editing = null })
+        LabelEditDialog(stringResource(Res.string.labels_edit), label.name, label.color, { name, color -> scope.launch { store.updateLabel(label.id, name, color) } }, { editing = null })
     }
     deleting?.let { label ->
         ConfirmDialog(
-            title = "Delete \"${label.name}\"?",
-            text = "It will be removed from every entry. The entries themselves are kept.",
-            confirmLabel = "Delete",
+            title = stringResource(Res.string.labels_delete_title, label.name),
+            text = stringResource(Res.string.labels_delete_text),
+            confirmLabel = stringResource(Res.string.action_delete),
             destructive = true,
             onConfirm = { scope.launch { store.deleteLabel(label.id) } },
             onDismiss = { deleting = null },

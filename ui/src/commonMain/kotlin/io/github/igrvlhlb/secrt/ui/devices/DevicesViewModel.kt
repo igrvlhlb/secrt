@@ -16,6 +16,11 @@ import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.storage.Peer
 import io.github.igrvlhlb.secrt.ui.components.adoptedMessage
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.plural
+import io.github.igrvlhlb.secrt.ui.text.text
+import io.github.igrvlhlb.secrt.ui.text.toUiText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
@@ -39,7 +44,7 @@ internal class DevicesViewModel(private val lan: LanSync, session: AppSession, s
     val host: LanHost = lan.host()
 
     /** What this device is doing as the one that scanned a code; `null` when idle. */
-    var progress by mutableStateOf<String?>(null)
+    var progress by mutableStateOf<UiText?>(null)
         private set
 
     /** Identity key of the peer being synced. */
@@ -49,7 +54,7 @@ internal class DevicesViewModel(private val lan: LanSync, session: AppSession, s
     /** Something to show in a dialog: outcomes of pairing, and errors. */
     var notice by mutableStateOf<Notice?>(null)
 
-    data class Notice(val title: String, val text: String)
+    data class Notice(val title: UiText, val text: UiText)
 
     /**
      * A question from a pairing or sync this device started, waiting for [answer]. Those from
@@ -60,7 +65,7 @@ internal class DevicesViewModel(private val lan: LanSync, session: AppSession, s
 
     private var pendingAnswer: CompletableDeferred<Boolean>? = null
 
-    private val _snackbar = Channel<String>(Channel.BUFFERED)
+    private val _snackbar = Channel<UiText>(Channel.BUFFERED)
     val snackbar = _snackbar.receiveAsFlow()
 
     init {
@@ -68,9 +73,9 @@ internal class DevicesViewModel(private val lan: LanSync, session: AppSession, s
         viewModelScope.launch {
             host.events.collect { event ->
                 when (event) {
-                    is LanHost.Event.Paired -> _snackbar.send("Paired with ${event.peerName}")
-                    is LanHost.Event.Synced -> _snackbar.send("Synced with ${event.peerName}: ${event.stats.describe()}")
-                    is LanHost.Event.Failed -> _snackbar.send(event.message)
+                    is LanHost.Event.Paired -> _snackbar.send(text(Res.string.devices_paired_with, event.peerName))
+                    is LanHost.Event.Synced -> _snackbar.send(text(Res.string.devices_synced_with, event.peerName, event.stats.describe()))
+                    is LanHost.Event.Failed -> _snackbar.send(event.toUiText())
                     is LanHost.Event.DiarySent -> notice = diarySent(event.peerName)
                     is LanHost.Event.DiaryReceived, is LanHost.Event.WaitingForAnswer -> Unit
                 }
@@ -96,23 +101,24 @@ internal class DevicesViewModel(private val lan: LanSync, session: AppSession, s
 
     fun pair(link: String) {
         if (progress != null) return
-        progress = "Connecting…"
+        progress = text(Res.string.lan_connecting)
         viewModelScope.launch {
             try {
                 val result = lan.pair(link, ::ask) { progress = it.label() }
                 notice = when (result) {
-                    is PairingResult.Paired -> Notice("Paired with ${result.peerName}", "Synced: ${result.stats.describe()}.")
+                    is PairingResult.Paired -> Notice(
+                        text(Res.string.devices_paired_with, result.peerName),
+                        text(Res.string.devices_paired_synced, result.stats.describe()),
+                    )
                     is PairingResult.DiarySent -> diarySent(result.peerName)
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: LanException.Declined) {
                 // The user's own "no": nothing went wrong.
-                _snackbar.send(e.message.orEmpty())
-            } catch (e: LanException) {
-                notice = Notice("Couldn't pair", e.message.orEmpty())
+                _snackbar.send(e.toUiText())
             } catch (e: Exception) {
-                notice = Notice("Couldn't pair", e.message ?: "Something went wrong")
+                notice = Notice(text(Res.string.devices_pair_failed), e.toUiText())
             } finally {
                 progress = null
             }
@@ -125,13 +131,13 @@ internal class DevicesViewModel(private val lan: LanSync, session: AppSession, s
         viewModelScope.launch {
             try {
                 val stats = lan.sync(peer, ::ask)
-                _snackbar.send("Synced with ${peer.name}: ${stats.describe()}")
+                _snackbar.send(text(Res.string.devices_synced_with, peer.name, stats.describe()))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: LanException.Declined) {
-                _snackbar.send(e.message.orEmpty())
+                _snackbar.send(e.toUiText())
             } catch (e: Exception) {
-                notice = Notice("Couldn't sync with ${peer.name}", e.message ?: "Something went wrong")
+                notice = Notice(text(Res.string.devices_sync_failed, peer.name), e.toUiText())
             } finally {
                 syncing = null
             }
@@ -168,20 +174,22 @@ internal class DevicesViewModel(private val lan: LanSync, session: AppSession, s
     }
 
     private fun diarySent(peerName: String) = Notice(
-        "Diary sent to $peerName",
-        "To open it there, type this diary's password (or recovery key) on $peerName.",
+        text(Res.string.devices_diary_sent_title, peerName),
+        text(Res.string.devices_diary_sent_text, peerName),
     )
 }
 
-internal fun LanProgress.label() = when (this) {
-    LanProgress.Connecting -> "Connecting…"
-    LanProgress.SendingDiary -> "Sending the diary…"
-    LanProgress.WaitingForAnswer -> "Waiting for an answer on the other device…"
-    LanProgress.ReceivingDiary -> "Receiving the diary…"
-    LanProgress.Syncing -> "Syncing…"
-}
+internal fun LanProgress.label(): UiText = text(
+    when (this) {
+        LanProgress.Connecting -> Res.string.lan_connecting
+        LanProgress.SendingDiary -> Res.string.lan_sending_diary
+        LanProgress.WaitingForAnswer -> Res.string.lan_waiting_for_answer
+        LanProgress.ReceivingDiary -> Res.string.lan_receiving_diary
+        LanProgress.Syncing -> Res.string.lan_syncing
+    },
+)
 
-internal fun SyncStats.describe(): String = when {
-    received == 0 && sent == 0 -> "already up to date"
-    else -> "$received ${if (received == 1) "change" else "changes"} received, $sent sent"
+internal fun SyncStats.describe(): UiText = when {
+    received == 0 && sent == 0 -> text(Res.string.sync_up_to_date)
+    else -> text(Res.string.sync_stats, plural(Res.plurals.sync_received, received), plural(Res.plurals.sync_sent, sent))
 }

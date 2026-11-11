@@ -4,10 +4,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import io.github.igrvlhlb.secrt.archive.SecrtArchive
+import io.github.igrvlhlb.secrt.ui.resources.Res
+import io.github.igrvlhlb.secrt.ui.resources.settings_open_backup_title
+import io.github.igrvlhlb.secrt.ui.resources.settings_save_backup_title
 import okio.Sink
 import okio.Source
 import okio.sink
 import okio.source
+import org.jetbrains.compose.resources.stringResource
 import java.awt.FileDialog
 import java.awt.Frame
 import java.awt.KeyboardFocusManager
@@ -16,8 +20,9 @@ import java.io.File
 @Composable
 actual fun rememberOpenDocument(onResult: (PickedDocument?) -> Unit): () -> Unit {
     val currentOnResult by rememberUpdatedState(onResult)
+    val title = stringResource(Res.string.settings_open_backup_title)
     return {
-        val file = chooseFile("Open a backup", FileDialog.LOAD, extension = SecrtArchive.EXTENSION)
+        val file = chooseFile(title, FileDialog.LOAD, extension = SecrtArchive.EXTENSION)
         currentOnResult(file?.let(::FileDocument))
     }
 }
@@ -25,7 +30,8 @@ actual fun rememberOpenDocument(onResult: (PickedDocument?) -> Unit): () -> Unit
 @Composable
 actual fun rememberCreateDocument(onResult: (DocumentTarget?) -> Unit): (suggestedName: String) -> Unit {
     val currentOnResult by rememberUpdatedState(onResult)
-    return { name -> currentOnResult(chooseFile("Save backup", FileDialog.SAVE, suggestedName = name)?.let(::FileDocument)) }
+    val title = stringResource(Res.string.settings_save_backup_title)
+    return { name -> currentOnResult(chooseFile(title, FileDialog.SAVE, suggestedName = name)?.let(::FileDocument)) }
 }
 
 /**

@@ -30,12 +30,12 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,11 +59,17 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.igrvlhlb.secrt.session.BiometricException
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.string
+import io.github.igrvlhlb.secrt.ui.text.text
+import io.github.igrvlhlb.secrt.ui.text.toUiText
 import io.github.igrvlhlb.secrt.vault.Credential
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 const val MIN_PASSWORD_LENGTH = 8
 
@@ -107,7 +113,7 @@ fun PasswordField(
         keyboardActions = KeyboardActions(onDone = { onDone() }),
         trailingIcon = {
             IconButton(onClick = { visible = !visible }) {
-                Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, if (visible) "Hide" else "Show")
+                Icon(if (visible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility, stringResource(if (visible) Res.string.password_hide else Res.string.password_show))
             }
         },
         modifier = modifier.fillMaxWidth(),
@@ -130,10 +136,10 @@ private fun NewPasswordForm(buttonText: String, busy: Boolean, extra: @Composabl
     val mismatch = confirmation.isNotEmpty() && confirmation != password
     val valid = password.length >= MIN_PASSWORD_LENGTH && password == confirmation
 
-    PasswordField(password, { password = it }, "Password", isError = tooShort)
-    if (tooShort) Text("At least $MIN_PASSWORD_LENGTH characters", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-    PasswordField(confirmation, { confirmation = it }, "Repeat password", isError = mismatch, imeAction = ImeAction.Done, onDone = { if (valid) onSubmit(password) })
-    if (mismatch) Text("Passwords don't match", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    PasswordField(password, { password = it }, stringResource(Res.string.password), isError = tooShort)
+    if (tooShort) Text(stringResource(Res.string.password_too_short, MIN_PASSWORD_LENGTH), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    PasswordField(confirmation, { confirmation = it }, stringResource(Res.string.password_repeat), isError = mismatch, imeAction = ImeAction.Done, onDone = { if (valid) onSubmit(password) })
+    if (mismatch) Text(stringResource(Res.string.password_mismatch), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     extra()
     BusyButton(buttonText, busy, valid) { onSubmit(password) }
 }
@@ -149,29 +155,28 @@ fun SetupScreen(
     onRestore: () -> Unit,
     moreRestoreOptions: @Composable () -> Unit = {},
     onSetUpFromDevice: (() -> Unit)? = null,
-    setUpFromDeviceLabel: String = "Set up from another device",
+    setUpFromDeviceLabel: String = stringResource(Res.string.setup_from_another_device),
 ) {
     val scope = rememberCoroutineScope()
     var withRecoveryKey by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<UiText?>(null) }
 
     AuthLayout(
         Icons.Outlined.Lock,
-        "Welcome to secrt",
-        "Your diary is encrypted and stays on this device. Choose a password to protect it. " +
-            "We can't recover it for you, so make it memorable.",
+        stringResource(Res.string.setup_title),
+        stringResource(Res.string.setup_subtitle),
     ) {
         NewPasswordForm(
-            buttonText = "Create diary",
+            buttonText = stringResource(Res.string.setup_create),
             busy = busy,
             extra = {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Checkbox(checked = withRecoveryKey, onCheckedChange = { withRecoveryKey = it })
                     Column {
-                        Text("Create a recovery key (recommended)")
+                        Text(stringResource(Res.string.setup_recovery_key))
                         Text(
-                            "A code you write down to get back in if you forget the password.",
+                            stringResource(Res.string.setup_recovery_key_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -185,19 +190,19 @@ fun SetupScreen(
                 try {
                     onCreate(password, withRecoveryKey)
                 } catch (e: Exception) {
-                    error = e.message ?: "Couldn't create the diary"
+                    error = e.toUiText(Res.string.setup_failed)
                 } finally {
                     busy = false
                 }
             }
         }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        error?.let { Text(it.string(), color = MaterialTheme.colorScheme.error) }
         HorizontalDivider()
-        Text("Already have a diary?", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(Res.string.setup_have_diary), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         OutlinedButton(onClick = onRestore, enabled = !busy, modifier = Modifier.fillMaxWidth().height(48.dp)) {
             Icon(Icons.Outlined.Restore, contentDescription = null)
             Spacer(Modifier.width(8.dp))
-            Text("Restore from a backup file")
+            Text(stringResource(Res.string.setup_restore_file))
         }
         moreRestoreOptions()
         if (onSetUpFromDevice != null) {
@@ -222,7 +227,7 @@ fun UnlockScreen(onUnlock: suspend (Credential) -> Unit, onBiometricUnlock: (sus
     var autoPrompted by remember { mutableStateOf(false) }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { autoPrompted = false }
     var prompting by remember { mutableStateOf(false) }
-    var notice by remember { mutableStateOf<String?>(null) }
+    var notice by remember { mutableStateOf<UiText?>(null) }
 
     fun promptForFingerprint() {
         val unlock = onBiometricUnlock ?: return
@@ -235,11 +240,11 @@ fun UnlockScreen(onUnlock: suspend (Credential) -> Unit, onBiometricUnlock: (sus
             } catch (e: BiometricException.Cancelled) {
                 // The password form is right there.
             } catch (e: BiometricException) {
-                notice = e.message
+                notice = e.toUiText()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                notice = e.message ?: "Couldn't open the diary"
+                notice = e.toUiText(Res.string.unlock_failed)
             } finally {
                 prompting = false
             }
@@ -255,18 +260,18 @@ fun UnlockScreen(onUnlock: suspend (Credential) -> Unit, onBiometricUnlock: (sus
     }
 
     CredentialScreen(
-        title = "Diary locked",
-        passwordHint = "Enter your password to open your diary.",
-        recoveryHint = "Enter the recovery key you saved when you created the diary.",
-        submitLabel = "Unlock",
+        title = stringResource(Res.string.unlock_title),
+        passwordHint = stringResource(Res.string.unlock_password_hint),
+        recoveryHint = stringResource(Res.string.unlock_recovery_hint),
+        submitLabel = stringResource(Res.string.unlock_action),
         onSubmit = onUnlock,
-        notice = notice,
+        notice = notice?.string(),
         extraActions = {
             if (onBiometricUnlock != null) {
                 OutlinedButton(onClick = ::promptForFingerprint, enabled = !prompting, modifier = Modifier.fillMaxWidth().height(48.dp)) {
                     Icon(Icons.Outlined.Fingerprint, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Unlock with fingerprint")
+                    Text(stringResource(Res.string.unlock_fingerprint))
                 }
             }
         },
@@ -277,10 +282,10 @@ fun UnlockScreen(onUnlock: suspend (Credential) -> Unit, onBiometricUnlock: (sus
 @Composable
 fun RestoreScreen(fileName: String, onRestore: suspend (Credential) -> Unit, onCancel: () -> Unit) {
     CredentialScreen(
-        title = "Restore backup",
-        passwordHint = "$fileName\n\nEnter the password of the diary this backup was made from.",
-        recoveryHint = "$fileName\n\nEnter the recovery key of the diary this backup was made from.",
-        submitLabel = "Restore",
+        title = stringResource(Res.string.restore_title),
+        passwordHint = stringResource(Res.string.restore_password_hint, fileName),
+        recoveryHint = stringResource(Res.string.restore_recovery_hint, fileName),
+        submitLabel = stringResource(Res.string.action_restore),
         onSubmit = onRestore,
         onCancel = onCancel,
     )
@@ -307,7 +312,7 @@ internal fun CredentialScreen(
     var useRecoveryKey by remember { mutableStateOf(false) }
     var secret by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<UiText?>(null) }
 
     fun submit() {
         if (secret.isEmpty() || busy) return
@@ -317,9 +322,9 @@ internal fun CredentialScreen(
             try {
                 onSubmit(if (useRecoveryKey) Credential.RecoveryKey(secret) else Credential.Password(secret))
             } catch (e: InvalidCredentialsException) {
-                error = if (useRecoveryKey) "That recovery key doesn't match" else "Wrong password"
+                error = text(if (useRecoveryKey) Res.string.credential_wrong_recovery_key else Res.string.credential_wrong_password)
             } catch (e: Exception) {
-                error = e.message ?: "Something went wrong"
+                error = e.toUiText()
             } finally {
                 busy = false
             }
@@ -336,7 +341,7 @@ internal fun CredentialScreen(
             OutlinedTextField(
                 value = secret,
                 onValueChange = { secret = it },
-                label = { Text("Recovery key") },
+                label = { Text(stringResource(Res.string.recovery_key)) },
                 placeholder = { Text("XXXX-XXXX-…") },
                 isError = error != null,
                 singleLine = true,
@@ -346,15 +351,15 @@ internal fun CredentialScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
         } else {
-            PasswordField(secret, { secret = it }, "Password", isError = error != null, imeAction = ImeAction.Done, onDone = ::submit)
+            PasswordField(secret, { secret = it }, stringResource(Res.string.password), isError = error != null, imeAction = ImeAction.Done, onDone = ::submit)
         }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        error?.let { Text(it.string(), color = MaterialTheme.colorScheme.error) }
         BusyButton(submitLabel, busy, secret.isNotEmpty(), ::submit)
         extraActions()
         TextButton(onClick = { useRecoveryKey = !useRecoveryKey; secret = ""; error = null }) {
-            Text(if (useRecoveryKey) "Use password instead" else "Forgot password? Use recovery key")
+            Text(stringResource(if (useRecoveryKey) Res.string.credential_use_password else Res.string.credential_use_recovery_key))
         }
-        if (onCancel != null) TextButton(enabled = !busy, onClick = onCancel) { Text("Cancel") }
+        if (onCancel != null) TextButton(enabled = !busy, onClick = onCancel) { Text(stringResource(Res.string.action_cancel)) }
     }
 }
 
@@ -364,16 +369,15 @@ fun RecoveryKeyScreen(recoveryKey: String, onDone: () -> Unit) {
     var saved by remember { mutableStateOf(false) }
     AuthLayout(
         Icons.Outlined.Key,
-        "Your recovery key",
-        "Write this down and keep it somewhere safe, away from your phone. It opens your diary if you " +
-            "forget your password. It won't be shown again.",
+        stringResource(Res.string.recovery_key_title),
+        stringResource(Res.string.recovery_key_subtitle),
     ) {
         RecoveryKeyCard(recoveryKey)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Checkbox(checked = saved, onCheckedChange = { saved = it })
-            Text("I've written it down")
+            Text(stringResource(Res.string.recovery_key_written))
         }
-        Button(onClick = onDone, enabled = saved, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Continue") }
+        Button(onClick = onDone, enabled = saved, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(stringResource(Res.string.action_continue)) }
     }
 }
 
@@ -396,20 +400,20 @@ fun RecoveryKeyCard(recoveryKey: String) {
 fun NewPasswordScreen(onSetPassword: suspend (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    AuthLayout(Icons.Outlined.Lock, "Choose a new password", "You opened the diary with your recovery key. Pick a new password to keep using it.") {
-        NewPasswordForm("Save password", busy) { password ->
+    var error by remember { mutableStateOf<UiText?>(null) }
+    AuthLayout(Icons.Outlined.Lock, stringResource(Res.string.new_password_title), stringResource(Res.string.new_password_subtitle)) {
+        NewPasswordForm(stringResource(Res.string.new_password_save), busy) { password ->
             busy = true
             scope.launch {
                 try {
                     onSetPassword(password)
                 } catch (e: Exception) {
-                    error = e.message ?: "Couldn't change the password"
+                    error = e.toUiText(Res.string.change_password_failed)
                 } finally {
                     busy = false
                 }
             }
         }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        error?.let { Text(it.string(), color = MaterialTheme.colorScheme.error) }
     }
 }

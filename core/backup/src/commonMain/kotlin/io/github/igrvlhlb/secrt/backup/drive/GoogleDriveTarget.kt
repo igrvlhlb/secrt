@@ -4,6 +4,7 @@ import io.github.igrvlhlb.secrt.backup.BackupException
 import io.github.igrvlhlb.secrt.backup.BackupServerException
 import io.github.igrvlhlb.secrt.backup.BackupTarget
 import io.github.igrvlhlb.secrt.backup.BackupTargetConfig
+import io.github.igrvlhlb.secrt.backup.drive.GoogleDriveException.Action
 import io.github.igrvlhlb.secrt.backup.webdav.defaultHttpEngine
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.request.HttpRequestBuilder
@@ -75,7 +76,7 @@ class GoogleDriveTarget(
     override suspend fun get(path: String): ByteArray? {
         checkPath(path)
         val file = files()[path]?.firstOrNull() ?: return null
-        val response = send("download $path", allow404 = true) {
+        val response = send(Action.Download, path, allow404 = true) {
             method = HttpMethod.Get
             url("${endpoints.api}/drive/v3/files/${file.id}")
             parameter("alt", "media")
@@ -85,7 +86,7 @@ class GoogleDriveTarget(
             return null
         }
         // Drive isn't trusted more than any server: don't let it make us allocate without bound.
-        if ((response.contentLength() ?: 0) > MAX_FILE_BYTES) throw BackupServerException("$path is larger than any backup file")
+        if ((response.contentLength() ?: 0) > MAX_FILE_BYTES) throw BackupServerException(BackupServerException.Problem.FileTooLarge, path)
         return response.bodyAsBytes()
     }
 
@@ -113,7 +114,7 @@ class GoogleDriveTarget(
         val all = mutableListOf<DriveFile>()
         var pageToken: String? = null
         do {
-            val response = send("list the backup's files") {
+            val response = send(Action.ListFiles) {
                 method = HttpMethod.Get
                 url("${endpoints.api}/drive/v3/files")
                 parameter("spaces", "appDataFolder")
@@ -132,13 +133,13 @@ class GoogleDriveTarget(
 
     private suspend fun create(path: String, bytes: ByteArray): DriveFile {
         val metadata = JsonObject(mapOf("name" to JsonPrimitive(path), "parents" to JsonArray(listOf(JsonPrimitive("appDataFolder")))))
-        if (bytes.size > SIMPLE_UPLOAD_MAX_BYTES) return resumable("upload $path", HttpMethod.Post, "${endpoints.api}/upload/drive/v3/files", metadata, bytes)
+        if (bytes.size > SIMPLE_UPLOAD_MAX_BYTES) return resumable(path, HttpMethod.Post, "${endpoints.api}/upload/drive/v3/files", metadata, bytes)
         val boundary = "secrt-" + Random.nextBytes(12).toHex()
         val body = (
             "--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n$metadata\r\n" +
                 "--$boundary\r\nContent-Type: application/octet-stream\r\n\r\n"
             ).encodeToByteArray() + bytes + "\r\n--$boundary--\r\n".encodeToByteArray()
-        val response = send("upload $path") {
+        val response = send(Action.Upload, path) {
             method = HttpMethod.Post
             url("${endpoints.api}/upload/drive/v3/files")
             parameter("uploadType", "multipart")
@@ -150,9 +151,9 @@ class GoogleDriveTarget(
 
     private suspend fun update(id: String, path: String, bytes: ByteArray): DriveFile {
         if (bytes.size > SIMPLE_UPLOAD_MAX_BYTES) {
-            return resumable("upload $path", HttpMethod.Patch, "${endpoints.api}/upload/drive/v3/files/$id", JsonObject(emptyMap()), bytes)
+            return resumable(path, HttpMethod.Patch, "${endpoints.api}/upload/drive/v3/files/$id", JsonObject(emptyMap()), bytes)
         }
-        val response = send("upload $path") {
+        val response = send(Action.Upload, path) {
             method = HttpMethod.Patch
             url("${endpoints.api}/upload/drive/v3/files/$id")
             parameter("uploadType", "media")
@@ -163,8 +164,8 @@ class GoogleDriveTarget(
     }
 
     /** Drive's resumable upload, sent in one piece: the way to upload files above 5 MB. */
-    private suspend fun resumable(action: String, method: HttpMethod, url: String, metadata: JsonObject, bytes: ByteArray): DriveFile {
-        val start = send(action) {
+    private suspend fun resumable(path: String, method: HttpMethod, url: String, metadata: JsonObject, bytes: ByteArray): DriveFile {
+        val start = send(Action.Upload, path) {
             this.method = method
             url(url)
             parameter("uploadType", "resumable")
@@ -173,8 +174,8 @@ class GoogleDriveTarget(
             header("X-Upload-Content-Length", bytes.size.toString())
             setBody(TextContent(metadata.toString(), ContentType.Application.Json))
         }
-        val session = start.headers[HttpHeaders.Location] ?: throw BackupServerException("Google Drive didn't start the upload")
-        val response = send(action) {
+        val session = start.headers[HttpHeaders.Location] ?: throw GoogleDriveException(GoogleDriveException.Problem.UploadNotStarted)
+        val response = send(Action.Upload, path) {
             this.method = HttpMethod.Put
             url(session)
             setBody(ByteArrayContent(bytes, ContentType.Application.OctetStream))
@@ -183,7 +184,7 @@ class GoogleDriveTarget(
     }
 
     private suspend fun deleteFile(id: String, path: String) {
-        send("delete $path", allow404 = true) {
+        send(Action.Delete, path, allow404 = true) {
             method = HttpMethod.Delete
             url("${endpoints.api}/drive/v3/files/$id")
         }
@@ -194,7 +195,7 @@ class GoogleDriveTarget(
      * retries with growing waits when Drive asks to slow down or fails for a moment. Returns
      * successful responses (and 404s with [allow404]); throws a [BackupException] otherwise.
      */
-    private suspend fun send(action: String, allow404: Boolean = false, block: HttpRequestBuilder.() -> Unit): HttpResponse {
+    private suspend fun send(action: Action, path: String? = null, allow404: Boolean = false, block: HttpRequestBuilder.() -> Unit): HttpResponse {
         var newToken = false
         var retries = 0
         while (true) {
@@ -217,7 +218,7 @@ class GoogleDriveTarget(
                 delay(retryDelaysMillis[retries++])
                 continue
             }
-            throw error.toException(action)
+            throw error.toException(action, path)
         }
     }
 
@@ -234,13 +235,12 @@ class GoogleDriveTarget(
         val isTemporary: Boolean
             get() = status == 429 || status in 500..504 || (status == 403 && reasons.any { it in RATE_LIMITED })
 
-        fun toException(action: String): BackupException = when {
-            status == 401 -> GoogleAuthException("Google refused secrt access to your Drive. Connect your Google account again.")
-            "storageQuotaExceeded" in reasons -> BackupServerException("Your Google storage is full")
-            reasons.any { it == "accessNotConfigured" || it == "SERVICE_DISABLED" } ->
-                BackupServerException("The Google Drive API isn't enabled for this build of secrt")
-            status == 403 || status == 429 -> BackupServerException("Google Drive doesn't let secrt $action" + (message?.let { ": $it" } ?: ""))
-            else -> BackupServerException("Google Drive couldn't $action (HTTP $status)")
+        fun toException(action: Action, path: String?): BackupException = when {
+            status == 401 -> GoogleAuthException(GoogleAuthException.Reason.DriveAccessRefused)
+            "storageQuotaExceeded" in reasons -> GoogleDriveException(GoogleDriveException.Problem.StorageFull)
+            reasons.any { it == "accessNotConfigured" || it == "SERVICE_DISABLED" } -> GoogleDriveException(GoogleDriveException.Problem.ApiDisabled)
+            status == 403 || status == 429 -> GoogleDriveException(GoogleDriveException.Problem.NotAllowed, action, path, detail = message)
+            else -> GoogleDriveException(GoogleDriveException.Problem.Failed, action, path, status)
         }
 
         companion object {

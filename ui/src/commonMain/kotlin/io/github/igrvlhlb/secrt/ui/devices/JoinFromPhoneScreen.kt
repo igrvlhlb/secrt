@@ -27,8 +27,14 @@ import io.github.igrvlhlb.secrt.lan.LanHost
 import io.github.igrvlhlb.secrt.lan.LanSync
 import io.github.igrvlhlb.secrt.lan.PendingJoin
 import io.github.igrvlhlb.secrt.ui.auth.CredentialScreen
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.string
+import io.github.igrvlhlb.secrt.ui.text.text
+import io.github.igrvlhlb.secrt.ui.text.toUiText
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * First run on a computer: shows a pairing code for the phone to scan; the phone sends its diary,
@@ -46,14 +52,14 @@ fun JoinFromPhoneScreen(lan: LanSync, onCancel: () -> Unit) {
     val status by host.status.collectAsStateWithLifecycle()
     val invite by host.invite.collectAsStateWithLifecycle()
     // What the phone that scanned the code is doing: asking its user, or giving up.
-    var note by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf<UiText?>(null) }
     LaunchedEffect(host) {
         launch { host.run() }
         launch {
             host.events.collect { event ->
                 when (event) {
-                    is LanHost.Event.WaitingForAnswer -> note = "Confirm on ${event.peerName} to send the diary here."
-                    is LanHost.Event.Failed -> note = event.message
+                    is LanHost.Event.WaitingForAnswer -> note = text(Res.string.join_confirm_there, event.peerName)
+                    is LanHost.Event.Failed -> note = event.toUiText()
                     else -> Unit
                 }
             }
@@ -69,15 +75,13 @@ fun JoinFromPhoneScreen(lan: LanSync, onCancel: () -> Unit) {
         verticalArrangement = Arrangement.Center,
     ) {
         Column(Modifier.widthIn(max = 460.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("Set up from your phone", style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+            Text(stringResource(Res.string.setup_from_phone), style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
             when (val s = status) {
-                LanHost.Status.Starting -> Text("Starting…")
-                is LanHost.Status.Failed -> Text(s.message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                LanHost.Status.Starting -> Text(stringResource(Res.string.devices_starting))
+                is LanHost.Status.Failed -> Text(s.toUiText().string(), color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                 is LanHost.Status.Listening -> PairingCodeCard(
                     invite = invite,
-                    instructions = "In secrt on your phone, open Settings → Devices → Scan a code, and scan this one. " +
-                        "The phone sends its diary, still encrypted; then you type the diary's password here. " +
-                        "Both must be on the same Wi-Fi.",
+                    instructions = stringResource(Res.string.join_instructions),
                     onNewCode = {
                         note = null
                         scope.launch { host.showInvite() }
@@ -85,8 +89,8 @@ fun JoinFromPhoneScreen(lan: LanSync, onCancel: () -> Unit) {
                     onCancel = null,
                 )
             }
-            note?.let { Text(it, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.primary) }
-            TextButton(onClick = onCancel) { Text("Back") }
+            note?.let { Text(it.string(), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.primary) }
+            TextButton(onClick = onCancel) { Text(stringResource(Res.string.action_back)) }
         }
     }
 }
@@ -98,10 +102,10 @@ fun JoinFromPhoneScreen(lan: LanSync, onCancel: () -> Unit) {
 @Composable
 internal fun OpenReceivedDiaryScreen(lan: LanSync, join: PendingJoin, onCancel: () -> Unit) {
     CredentialScreen(
-        title = "Open your diary",
-        passwordHint = "${join.peerName} sent its diary. Enter the diary's password to open it here.",
-        recoveryHint = "${join.peerName} sent its diary. Enter the diary's recovery key to open it here.",
-        submitLabel = "Open",
+        title = stringResource(Res.string.open_received_title),
+        passwordHint = stringResource(Res.string.open_received_password_hint, join.peerName),
+        recoveryHint = stringResource(Res.string.open_received_recovery_hint, join.peerName),
+        submitLabel = stringResource(Res.string.action_open),
         onSubmit = { lan.completeJoin(it) },
         onCancel = {
             lan.discardJoin()

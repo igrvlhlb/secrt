@@ -1,6 +1,5 @@
 package io.github.igrvlhlb.secrt.backup.drive
 
-import io.github.igrvlhlb.secrt.backup.BackupServerException
 import io.github.igrvlhlb.secrt.backup.BackupTargetConfig
 import io.github.igrvlhlb.secrt.backup.Device
 import io.github.igrvlhlb.secrt.backup.draft
@@ -103,17 +102,17 @@ class GoogleDriveTargetTest {
         assertEquals(1, drive.files.size)
 
         repeat(4) { drive.failNext += 503 to FakeGoogleDrive.error(503, "Backend Error", "backendError") }
-        assertFailsWith<BackupServerException> { target().use { it.list("") } }
+        assertFailsWith<GoogleDriveException> { target().use { it.list("") } }
     }
 
     @Test
     fun errorsAreExplained() = runTest {
         drive.failNext += 403 to FakeGoogleDrive.error(403, "The user's Drive storage quota has been exceeded.", "storageQuotaExceeded")
-        val full = assertFailsWith<BackupServerException> { target().use { it.list("") } }
+        val full = assertFailsWith<GoogleDriveException> { target().use { it.list("") } }
         assertEquals("Your Google storage is full", full.message)
 
         drive.failNext += 403 to FakeGoogleDrive.error(403, "Drive API has not been used", "accessNotConfigured")
-        val disabled = assertFailsWith<BackupServerException> { target().use { it.list("") } }
+        val disabled = assertFailsWith<GoogleDriveException> { target().use { it.list("") } }
         assertTrue("isn't enabled" in disabled.message!!)
     }
 

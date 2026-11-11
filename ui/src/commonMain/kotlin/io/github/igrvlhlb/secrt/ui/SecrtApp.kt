@@ -46,10 +46,14 @@ import io.github.igrvlhlb.secrt.ui.editor.EditorViewModel
 import io.github.igrvlhlb.secrt.ui.home.HomeScreen
 import io.github.igrvlhlb.secrt.ui.platform.PickedDocument
 import io.github.igrvlhlb.secrt.ui.platform.rememberOpenDocument
+import io.github.igrvlhlb.secrt.ui.resources.Res
+import io.github.igrvlhlb.secrt.ui.resources.setup_from_another_device
+import io.github.igrvlhlb.secrt.ui.resources.setup_from_phone
 import io.github.igrvlhlb.secrt.ui.theme.SecrtTheme
 import io.github.igrvlhlb.secrt.vault.Credential
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.serialization.Serializable
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * Root of the app on every platform.
@@ -115,7 +119,7 @@ fun SecrtApp(
                             onRestore = pickBackup,
                             moreRestoreOptions = { CloudRestoreButton(session) },
                             onSetUpFromDevice = if (lan != null) ({ joiningFromDevice = true }) else null,
-                            setUpFromDeviceLabel = if (canScanCodes) "Set up from another device" else "Set up from your phone",
+                            setUpFromDeviceLabel = stringResource(if (canScanCodes) Res.string.setup_from_another_device else Res.string.setup_from_phone),
                         )
                         else -> RestoreScreen(
                             fileName = backup.name,

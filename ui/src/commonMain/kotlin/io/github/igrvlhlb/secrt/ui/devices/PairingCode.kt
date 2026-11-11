@@ -29,14 +29,17 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import io.github.igrvlhlb.secrt.lan.LanHost
+import io.github.igrvlhlb.secrt.ui.resources.*
 import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 
 /** A QR code, black on white whatever the theme (scanners expect that), with a quiet zone around it. */
 @Composable
 internal fun QrCode(text: String, modifier: Modifier = Modifier) {
     val modules = remember(text) { qrModules(text) }
-    Canvas(modifier.aspectRatio(1f).background(Color.White).padding(16.dp).semantics { contentDescription = "Pairing QR code" }) {
+    val description = stringResource(Res.string.pairing_qr_code)
+    Canvas(modifier.aspectRatio(1f).background(Color.White).padding(16.dp).semantics { contentDescription = description }) {
         val cell = size.minDimension / modules.size
         modules.forEachIndexed { y, row ->
             row.forEachIndexed { x, dark ->
@@ -63,16 +66,16 @@ internal fun PairingCodeCard(invite: LanHost.Invite?, instructions: String, onNe
             QrCode(invite.link, Modifier.widthIn(max = 280.dp).size(280.dp))
             Text(instructions, textAlign = TextAlign.Center)
             Text(
-                "Expires in ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}. It works once.",
+                stringResource(Res.string.pairing_expires, "${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
-            Text(if (invite == null) "No pairing code is shown." else "The pairing code expired.", textAlign = TextAlign.Center)
+            Text(stringResource(if (invite == null) Res.string.pairing_none else Res.string.pairing_expired), textAlign = TextAlign.Center)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onNewCode) { Text("New code") }
-            if (onCancel != null) TextButton(onClick = onCancel) { Text("Cancel") }
+            OutlinedButton(onClick = onNewCode) { Text(stringResource(Res.string.pairing_new_code)) }
+            if (onCancel != null) TextButton(onClick = onCancel) { Text(stringResource(Res.string.action_cancel)) }
         }
     }
 }

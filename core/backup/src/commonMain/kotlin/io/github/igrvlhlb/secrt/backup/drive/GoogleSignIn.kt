@@ -41,8 +41,56 @@ interface GoogleSignIn {
     suspend fun accessToken(account: BackupTargetConfig.GoogleDrive, stale: String?): String
 }
 
-/** Google turned down (or no longer gives) access to Drive. */
-class GoogleAuthException(message: String) : BackupException(message)
+/**
+ * Google turned down (or no longer gives) access to Drive, for [reason]. [detail] is technical
+ * (an HTTP status, or Google's error code). The message is English, for logs and tests; the UI
+ * has its own text for each reason.
+ */
+class GoogleAuthException(val reason: Reason, val detail: String? = null) : BackupException(englishMessage(reason, detail)) {
+
+    enum class Reason {
+        /** The user took the access back (or it expired): connect again. */
+        AccessRevoked,
+        SignInRefused,
+        ServiceFailed,
+        NoAccountEmail,
+        /** Drive refused even a fresh token. */
+        DriveAccessRefused,
+        /** This build's OAuth client isn't registered with Google. */
+        NotRegistered,
+        Unreachable,
+        Failed,
+        NotGranted,
+        NoDriveAccess,
+        /** Google's screens need the app in front. */
+        AppNotOpen,
+        TimedOut,
+        NoLastingAccess,
+        /** This computer has no refresh token for the account (e.g. a backup set up on another device). */
+        ReconnectOnThisComputer,
+        NoBrowser,
+    }
+
+    private companion object {
+        fun englishMessage(reason: Reason, detail: String?): String = when (reason) {
+            Reason.AccessRevoked -> "Google no longer gives secrt access to this account's Drive. Connect it again."
+            Reason.SignInRefused -> "Google refused secrt's sign-in ($detail)"
+            Reason.ServiceFailed -> "Google's sign-in service failed (HTTP $detail)"
+            Reason.NoAccountEmail -> "Google didn't tell secrt which account it signed in to" + (detail?.let { " (HTTP $it)" } ?: "")
+            Reason.DriveAccessRefused -> "Google refused secrt access to your Drive. Connect your Google account again."
+            Reason.NotRegistered -> "This build of secrt isn't registered with Google (developer error)"
+            Reason.Unreachable -> "Couldn't reach Google"
+            Reason.Failed -> "Google sign-in failed" + (detail?.let { " ($it)" } ?: "")
+            Reason.NotGranted -> "Google Drive access wasn't granted"
+            Reason.NoDriveAccess -> "Google didn't give secrt access to Drive"
+            Reason.AppNotOpen -> "Open secrt to sign in to Google"
+            Reason.TimedOut -> "Google sign-in took too long. Try again."
+            Reason.NoLastingAccess -> "Google didn't give secrt lasting access. Try again."
+            Reason.ReconnectOnThisComputer -> "Connect your Google account again on this computer"
+            Reason.NoBrowser -> "secrt couldn't open a browser for Google sign-in"
+        }
+    }
+}
 
 /** Where Google's services answer; tests point these at a fake server. */
 data class GoogleEndpoints(
@@ -129,14 +177,12 @@ class GoogleOAuthClient(
         return when (response.status.value) {
             200 -> lenientJson.decodeFromString(GoogleTokens.serializer(), text)
             // invalid_grant: revoked, expired, or a code already used.
-            400, 401 -> throw GoogleAuthException(
-                if ("invalid_grant" in text) {
-                    "Google no longer gives secrt access to this account's Drive. Connect it again."
-                } else {
-                    "Google refused secrt's sign-in (${response.status.value})"
-                },
-            )
-            else -> throw GoogleAuthException("Google's sign-in service failed (HTTP ${response.status.value})")
+            400, 401 -> throw if ("invalid_grant" in text) {
+                GoogleAuthException(GoogleAuthException.Reason.AccessRevoked)
+            } else {
+                GoogleAuthException(GoogleAuthException.Reason.SignInRefused, response.status.value.toString())
+            }
+            else -> throw GoogleAuthException(GoogleAuthException.Reason.ServiceFailed, response.status.value.toString())
         }
     }
 }
@@ -152,9 +198,9 @@ private suspend fun googleAccountEmail(accessToken: String, client: HttpClient, 
     val response = call {
         client.get("${endpoints.api}/oauth2/v3/userinfo") { header(HttpHeaders.Authorization, "Bearer $accessToken") }
     }
-    if (response.status.value != 200) throw GoogleAuthException("Google didn't tell secrt which account it signed in to (HTTP ${response.status.value})")
+    if (response.status.value != 200) throw GoogleAuthException(GoogleAuthException.Reason.NoAccountEmail, response.status.value.toString())
     return lenientJson.decodeFromString(UserInfo.serializer(), response.bodyAsText()).email
-        ?: throw GoogleAuthException("Google didn't tell secrt which account it signed in to")
+        ?: throw GoogleAuthException(GoogleAuthException.Reason.NoAccountEmail)
 }
 
 @Serializable

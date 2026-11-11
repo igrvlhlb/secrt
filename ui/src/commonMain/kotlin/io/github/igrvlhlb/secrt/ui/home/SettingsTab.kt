@@ -1,37 +1,41 @@
 package io.github.igrvlhlb.secrt.ui.home
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material.icons.outlined.Upload
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.ui.Alignment
-import io.github.igrvlhlb.secrt.archive.SecrtArchive
-import io.github.igrvlhlb.secrt.ui.LocalAutoLock
-import io.github.igrvlhlb.secrt.ui.backup.CloudBackupRow
-import io.github.igrvlhlb.secrt.ui.components.today
-import io.github.igrvlhlb.secrt.ui.platform.rememberCreateDocument
-import io.github.igrvlhlb.secrt.ui.platform.rememberOpenDocument
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.KeyOff
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Password
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -42,37 +46,41 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material.icons.outlined.Fingerprint
-import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Switch
-import androidx.compose.ui.semantics.Role
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.igrvlhlb.secrt.archive.SecrtArchive
 import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.session.AutoLockTimeout
 import io.github.igrvlhlb.secrt.session.BiometricAvailability
 import io.github.igrvlhlb.secrt.session.BiometricException
+import io.github.igrvlhlb.secrt.ui.LocalAutoLock
 import io.github.igrvlhlb.secrt.ui.auth.MIN_PASSWORD_LENGTH
 import io.github.igrvlhlb.secrt.ui.auth.PasswordField
 import io.github.igrvlhlb.secrt.ui.auth.RecoveryKeyCard
-import io.github.igrvlhlb.secrt.ui.devices.LocalOpenDevices
-import androidx.compose.material.icons.outlined.Devices
+import io.github.igrvlhlb.secrt.ui.backup.CloudBackupRow
 import io.github.igrvlhlb.secrt.ui.components.ConfirmDialog
+import io.github.igrvlhlb.secrt.ui.components.today
+import io.github.igrvlhlb.secrt.ui.devices.LocalOpenDevices
+import io.github.igrvlhlb.secrt.ui.platform.rememberCreateDocument
+import io.github.igrvlhlb.secrt.ui.platform.rememberOpenDocument
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.plural
+import io.github.igrvlhlb.secrt.ui.text.resolve
+import io.github.igrvlhlb.secrt.ui.text.text
+import io.github.igrvlhlb.secrt.ui.text.toUiText
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun SettingsTab(session: AppSession) {
@@ -83,7 +91,7 @@ fun SettingsTab(session: AppSession) {
     var confirmRegenerate by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
     var shownKey by remember { mutableStateOf<String?>(null) }
-    var working by remember { mutableStateOf<String?>(null) }
+    var working by remember { mutableStateOf<StringResource?>(null) }
     val autoLock = LocalAutoLock.current
     val settings by session.settings.collectAsStateWithLifecycle()
     val biometricEnabled by session.biometricUnlockEnabled.collectAsStateWithLifecycle()
@@ -102,7 +110,7 @@ fun SettingsTab(session: AppSession) {
                     // The system prompt must not count as leaving the app.
                     autoLock.pause()
                     session.enableBiometricUnlock()
-                    "Fingerprint unlock is on"
+                    text(Res.string.settings_fingerprint_turned_on)
                 } else {
                     session.disableBiometricUnlock()
                     null
@@ -110,81 +118,84 @@ fun SettingsTab(session: AppSession) {
             } catch (e: BiometricException.Cancelled) {
                 null
             } catch (e: BiometricException) {
-                e.message
+                e.toUiText()
             } finally {
                 if (on) autoLock.resume()
                 biometricBusy = false
             }
-            message?.let { snackbar.showSnackbar(it) }
+            message?.let { snackbar.showSnackbar(it.resolve()) }
         }
     }
 
     /** Runs a backup operation with a blocking progress dialog, reporting failures in the snackbar. */
-    fun runWithProgress(label: String, action: suspend () -> String) {
+    fun runWithProgress(label: StringResource, action: suspend () -> UiText) {
         working = label
         scope.launch {
             val message = try {
                 action()
             } catch (e: Exception) {
-                e.message ?: "Something went wrong"
+                e.toUiText()
             } finally {
                 working = null
             }
-            snackbar.showSnackbar(message)
+            snackbar.showSnackbar(message.resolve())
         }
     }
 
     val createBackupFile = rememberCreateDocument { target ->
         autoLock.resume()
         if (target != null) {
-            runWithProgress("Exporting…") {
+            runWithProgress(Res.string.settings_exporting) {
                 try {
                     session.exportTo(target.openSink())
                 } catch (e: Exception) {
                     target.delete()
                     throw e
                 }
-                "Backup saved as ${target.name}"
+                text(Res.string.settings_backup_saved, target.name)
             }
         }
     }
     val pickBackupFile = rememberOpenDocument { document ->
         autoLock.resume()
         if (document != null) {
-            runWithProgress("Importing…") {
+            runWithProgress(Res.string.settings_importing) {
                 when (val added = session.importFrom(document.openSource())) {
-                    0 -> "Nothing new in ${document.name}"
-                    1 -> "Imported 1 change"
-                    else -> "Imported $added changes"
+                    0 -> text(Res.string.settings_import_nothing, document.name)
+                    else -> plural(Res.plurals.settings_imported, added)
                 }
             }
         }
     }
 
-    TabScaffold(topBar = { TopAppBar(title = { Text("Settings") }) }) { modifier ->
+    TabScaffold(topBar = { TopAppBar(title = { Text(stringResource(Res.string.tab_settings)) }) }) { modifier ->
         Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             ElevatedCard {
-                SettingRow(Icons.Outlined.Password, "Change password", "Your data stays encrypted with the same key") { changingPassword = true }
+                SettingRow(Icons.Outlined.Password, stringResource(Res.string.settings_change_password), stringResource(Res.string.settings_change_password_hint)) {
+                    changingPassword = true
+                }
                 HorizontalDivider()
                 SettingRow(
                     Icons.Outlined.Key,
-                    if (hasRecoveryKey == true) "Create a new recovery key" else "Create a recovery key",
+                    stringResource(if (hasRecoveryKey == true) Res.string.settings_new_recovery_key else Res.string.settings_create_recovery_key),
                     when (hasRecoveryKey) {
-                        true -> "You have one. A new key replaces it."
-                        false -> "You don't have one. Without it, a forgotten password means losing the diary."
+                        true -> stringResource(Res.string.settings_recovery_key_present)
+                        false -> stringResource(Res.string.settings_recovery_key_absent)
                         null -> ""
                     },
                 ) { confirmRegenerate = true }
                 if (hasRecoveryKey == true) {
                     HorizontalDivider()
-                    SettingRow(Icons.Outlined.KeyOff, "Remove recovery key", "Only your password will open the diary") { confirmRemove = true }
+                    SettingRow(Icons.Outlined.KeyOff, stringResource(Res.string.settings_remove_recovery_key), stringResource(Res.string.settings_remove_recovery_key_hint)) {
+                        confirmRemove = true
+                    }
                 }
             }
             ElevatedCard {
                 SettingRow(
                     Icons.Outlined.Upload,
-                    "Export encrypted backup",
-                    "Save a .secrt file of the whole diary. It opens only with your password or recovery key.",
+                    stringResource(Res.string.settings_export),
+                    stringResource(Res.string.settings_export_hint),
                 ) {
                     autoLock.pause()
                     createBackupFile(SecrtArchive.fileName(today().toString()))
@@ -192,8 +203,8 @@ fun SettingsTab(session: AppSession) {
                 HorizontalDivider()
                 SettingRow(
                     Icons.Outlined.Download,
-                    "Import a backup",
-                    "Merge entries from a .secrt backup of this diary, e.g. one made on another device.",
+                    stringResource(Res.string.settings_import),
+                    stringResource(Res.string.settings_import_hint),
                 ) {
                     autoLock.pause()
                     pickBackupFile()
@@ -202,19 +213,21 @@ fun SettingsTab(session: AppSession) {
                 CloudBackupRow(session)
             }
             LocalOpenDevices.current?.let { openDevices ->
-                ElevatedCard { SettingRow(Icons.Outlined.Devices, "Devices", "Pair with your other devices and sync over Wi-Fi") { openDevices() } }
+                ElevatedCard {
+                    SettingRow(Icons.Outlined.Devices, stringResource(Res.string.settings_devices), stringResource(Res.string.settings_devices_hint)) { openDevices() }
+                }
             }
             ElevatedCard {
-                SettingRow(Icons.Outlined.Timer, "Auto-lock", settings.autoLock.description) { choosingAutoLock = true }
+                SettingRow(Icons.Outlined.Timer, stringResource(Res.string.settings_auto_lock), settings.autoLock.description()) { choosingAutoLock = true }
                 if (biometricAvailability != BiometricAvailability.Unsupported || biometricEnabled) {
                     HorizontalDivider()
                     SwitchRow(
                         Icons.Outlined.Fingerprint,
-                        "Unlock with fingerprint",
+                        stringResource(Res.string.settings_fingerprint),
                         when {
-                            biometricEnabled -> "Your fingerprint opens the diary. The password still works."
-                            biometricAvailability == BiometricAvailability.NoneEnrolled -> "Add a fingerprint in your phone's settings first"
-                            else -> "Open the diary with your fingerprint instead of typing the password"
+                            biometricEnabled -> stringResource(Res.string.settings_fingerprint_on_hint)
+                            biometricAvailability == BiometricAvailability.NoneEnrolled -> stringResource(Res.string.settings_fingerprint_none_enrolled)
+                            else -> stringResource(Res.string.settings_fingerprint_off_hint)
                         },
                         checked = biometricEnabled,
                         enabled = !biometricBusy && (biometricEnabled || biometricAvailability == BiometricAvailability.Available),
@@ -222,20 +235,16 @@ fun SettingsTab(session: AppSession) {
                     )
                 }
                 HorizontalDivider()
-                SettingRow(Icons.Outlined.Lock, "Lock now", "Close the diary until you unlock it again") { scope.launch { session.lock() } }
+                SettingRow(Icons.Outlined.Lock, stringResource(Res.string.settings_lock_now), stringResource(Res.string.settings_lock_now_hint)) {
+                    scope.launch { session.lock() }
+                }
             }
             ElevatedCard {
                 ListItem(
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     leadingContent = { Icon(Icons.Outlined.Info, contentDescription = null) },
-                    headlineContent = { Text("About your data") },
-                    supportingContent = {
-                        Text(
-                            "Entries, folders, labels and attachments are stored encrypted on this device. " +
-                                "Nothing leaves it unless you ask: exported files and cloud backups stay encrypted, " +
-                                "and devices you pair sync directly with each other over your Wi-Fi.",
-                        )
-                    },
+                    headlineContent = { Text(stringResource(Res.string.settings_about)) },
+                    supportingContent = { Text(stringResource(Res.string.settings_about_text)) },
                 )
             }
         }
@@ -253,24 +262,29 @@ fun SettingsTab(session: AppSession) {
     }
     if (changingPassword) {
         ChangePasswordDialog(
-            onChange = { current, new -> session.changePassword(current, new); snackbar.showSnackbar("Password changed. Your other devices take it on when they sync.") },
+            onChange = { current, new ->
+                session.changePassword(current, new)
+                snackbar.showSnackbar(text(Res.string.settings_password_changed).resolve())
+            },
             onDismiss = { changingPassword = false },
         )
     }
     if (confirmRegenerate) {
         ConfirmDialog(
-            title = "Create a recovery key?",
-            text = if (hasRecoveryKey == true) "Your current recovery key will stop working." else "You'll see it once. Write it down somewhere safe.",
-            confirmLabel = "Create",
+            title = stringResource(Res.string.settings_create_recovery_key_title),
+            text = stringResource(
+                if (hasRecoveryKey == true) Res.string.settings_create_recovery_key_replaces else Res.string.settings_create_recovery_key_once,
+            ),
+            confirmLabel = stringResource(Res.string.action_create),
             onConfirm = { scope.launch { shownKey = session.regenerateRecoveryKey(); hasRecoveryKey = true } },
             onDismiss = { confirmRegenerate = false },
         )
     }
     if (confirmRemove) {
         ConfirmDialog(
-            title = "Remove recovery key?",
-            text = "If you forget your password, there will be no way to open your diary.",
-            confirmLabel = "Remove",
+            title = stringResource(Res.string.settings_remove_recovery_key_title),
+            text = stringResource(Res.string.settings_remove_recovery_key_text),
+            confirmLabel = stringResource(Res.string.action_remove),
             destructive = true,
             onConfirm = { scope.launch { session.removeRecoveryKey(); hasRecoveryKey = false } },
             onDismiss = { confirmRemove = false },
@@ -282,7 +296,7 @@ fun SettingsTab(session: AppSession) {
             text = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     CircularProgressIndicator(Modifier.size(24.dp))
-                    Text(label)
+                    Text(stringResource(label))
                 }
             },
             confirmButton = {},
@@ -291,14 +305,14 @@ fun SettingsTab(session: AppSession) {
     shownKey?.let { key ->
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("Your new recovery key") },
+            title = { Text(stringResource(Res.string.settings_new_recovery_key_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Write it down and keep it away from your phone. It won't be shown again.")
+                    Text(stringResource(Res.string.settings_new_recovery_key_text))
                     RecoveryKeyCard(key)
                 }
             },
-            confirmButton = { TextButton(onClick = { shownKey = null }) { Text("I've written it down") } },
+            confirmButton = { TextButton(onClick = { shownKey = null }) { Text(stringResource(Res.string.recovery_key_written)) } },
         )
     }
 }
@@ -326,28 +340,30 @@ private fun SwitchRow(icon: ImageVector, title: String, subtitle: String, checke
     )
 }
 
-private val AutoLockTimeout.label: String
-    get() = when (this) {
-        AutoLockTimeout.Immediately -> "Immediately"
-        AutoLockTimeout.OneMinute -> "After 1 minute"
-        AutoLockTimeout.FiveMinutes -> "After 5 minutes"
-        AutoLockTimeout.FifteenMinutes -> "After 15 minutes"
-        AutoLockTimeout.OneHour -> "After 1 hour"
-        AutoLockTimeout.OnAppRestart -> "When the app restarts"
-    }
+@Composable
+private fun AutoLockTimeout.label(): String = stringResource(
+    when (this) {
+        AutoLockTimeout.Immediately -> Res.string.auto_lock_immediately
+        AutoLockTimeout.OneMinute -> Res.string.auto_lock_one_minute
+        AutoLockTimeout.FiveMinutes -> Res.string.auto_lock_five_minutes
+        AutoLockTimeout.FifteenMinutes -> Res.string.auto_lock_fifteen_minutes
+        AutoLockTimeout.OneHour -> Res.string.auto_lock_one_hour
+        AutoLockTimeout.OnAppRestart -> Res.string.auto_lock_on_restart
+    },
+)
 
-private val AutoLockTimeout.description: String
-    get() = when (this) {
-        AutoLockTimeout.Immediately -> "As soon as you leave the app"
-        AutoLockTimeout.OnAppRestart -> "Only when the app is closed or the phone restarts"
-        else -> "$label in the background"
-    }
+@Composable
+private fun AutoLockTimeout.description(): String = when (this) {
+    AutoLockTimeout.Immediately -> stringResource(Res.string.auto_lock_immediately_hint)
+    AutoLockTimeout.OnAppRestart -> stringResource(Res.string.auto_lock_on_restart_hint)
+    else -> stringResource(Res.string.auto_lock_in_background, label())
+}
 
 @Composable
 private fun AutoLockDialog(current: AutoLockTimeout, onSelect: (AutoLockTimeout) -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Lock the diary") },
+        title = { Text(stringResource(Res.string.auto_lock_title)) },
         text = {
             Column(Modifier.selectableGroup()) {
                 AutoLockTimeout.entries.forEach { option ->
@@ -359,18 +375,18 @@ private fun AutoLockDialog(current: AutoLockTimeout, onSelect: (AutoLockTimeout)
                     ) {
                         RadioButton(selected = option == current, onClick = null)
                         Spacer(Modifier.width(16.dp))
-                        Text(option.label)
+                        Text(option.label())
                     }
                 }
                 Text(
-                    "Time the app can spend in the background before it asks for your password again.",
+                    stringResource(Res.string.auto_lock_explanation),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_cancel)) } },
     )
 }
 
@@ -381,18 +397,18 @@ private fun ChangePasswordDialog(onChange: suspend (current: String, new: String
     var new by remember { mutableStateOf("") }
     var repeat by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<StringResource?>(null) }
     val valid = current.isNotEmpty() && new.length >= MIN_PASSWORD_LENGTH && new == repeat
 
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("Change password") },
+        title = { Text(stringResource(Res.string.settings_change_password)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                PasswordField(current, { current = it }, "Current password", isError = error != null)
-                PasswordField(new, { new = it }, "New password (min. $MIN_PASSWORD_LENGTH)")
-                PasswordField(repeat, { repeat = it }, "Repeat new password", isError = repeat.isNotEmpty() && repeat != new, imeAction = ImeAction.Done)
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                PasswordField(current, { current = it }, stringResource(Res.string.change_password_current), isError = error != null)
+                PasswordField(new, { new = it }, stringResource(Res.string.change_password_new, MIN_PASSWORD_LENGTH))
+                PasswordField(repeat, { repeat = it }, stringResource(Res.string.change_password_repeat), isError = repeat.isNotEmpty() && repeat != new, imeAction = ImeAction.Done)
+                error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {
@@ -403,13 +419,13 @@ private fun ChangePasswordDialog(onChange: suspend (current: String, new: String
                         onChange(current, new)
                         onDismiss()
                     } catch (e: InvalidCredentialsException) {
-                        error = "Current password is wrong"
+                        error = Res.string.change_password_wrong
                     } finally {
                         busy = false
                     }
                 }
-            }) { Text(if (busy) "Saving…" else "Change") }
+            }) { Text(stringResource(if (busy) Res.string.change_password_saving else Res.string.action_change)) }
         },
-        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text(stringResource(Res.string.action_cancel)) } },
     )
 }

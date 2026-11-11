@@ -28,10 +28,15 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.igrvlhlb.secrt.lan.LanProgress
 import io.github.igrvlhlb.secrt.lan.LanSync
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.string
+import io.github.igrvlhlb.secrt.ui.text.toUiText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * First run on a device that scans codes (a phone): scans the code shown by a device that has the
@@ -61,16 +66,15 @@ fun SetUpFromDeviceScreen(lan: LanSync, onCancel: () -> Unit) {
     val progress = vm.progress
     val error = vm.error
     when {
-        progress != null -> StatusPage("Setting up from your other device", progress, busy = true) {
-            TextButton(onClick = back) { Text("Cancel") }
+        progress != null -> StatusPage(stringResource(Res.string.setup_device_progress_title), progress.string(), busy = true) {
+            TextButton(onClick = back) { Text(stringResource(Res.string.action_cancel)) }
         }
-        error != null -> StatusPage("Couldn't set up from the other device", error, busy = false) {
-            Button(onClick = vm::reset) { Text("Scan again") }
-            TextButton(onClick = back) { Text("Back") }
+        error != null -> StatusPage(stringResource(Res.string.setup_device_failed_title), error.string(), busy = false) {
+            Button(onClick = vm::reset) { Text(stringResource(Res.string.setup_device_scan_again)) }
+            TextButton(onClick = back) { Text(stringResource(Res.string.action_back)) }
         }
         else -> ScanScreen(
-            instructions = "On the device that has your diary, open secrt → Settings → Devices → Show a code, and point " +
-                "the camera at it. Both must be on the same Wi-Fi.",
+            instructions = stringResource(Res.string.setup_device_instructions),
             onScanned = vm::join,
             onBack = back,
         )
@@ -80,10 +84,10 @@ fun SetUpFromDeviceScreen(lan: LanSync, onCancel: () -> Unit) {
 /** Runs the transfer outside the composition, so it survives the activity being recreated (e.g. rotation). */
 internal class SetUpFromDeviceViewModel(private val lan: LanSync) : ViewModel() {
 
-    var progress by mutableStateOf<String?>(null)
+    var progress by mutableStateOf<UiText?>(null)
         private set
 
-    var error by mutableStateOf<String?>(null)
+    var error by mutableStateOf<UiText?>(null)
         private set
 
     private var job: Job? = null
@@ -99,7 +103,7 @@ internal class SetUpFromDeviceViewModel(private val lan: LanSync) : ViewModel() 
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                error = e.message ?: "Something went wrong"
+                error = e.toUiText()
             } finally {
                 progress = null
             }

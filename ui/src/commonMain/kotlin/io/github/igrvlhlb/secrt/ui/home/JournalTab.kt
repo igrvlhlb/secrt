@@ -46,7 +46,9 @@ import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.ui.components.ColorDot
 import io.github.igrvlhlb.secrt.ui.components.EntryCard
 import io.github.igrvlhlb.secrt.ui.components.monthYear
+import io.github.igrvlhlb.secrt.ui.resources.*
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun JournalTab(
@@ -69,10 +71,10 @@ fun JournalTab(
                 SearchBar(query, onQueryChange = { vm.query.value = it }, onClose = { searching = false; vm.query.value = "" })
             } else {
                 TopAppBar(
-                    title = { Text("Journal") },
+                    title = { Text(stringResource(Res.string.tab_journal)) },
                     actions = {
-                        IconButton(onClick = { searching = true }) { Icon(Icons.Outlined.Search, "Search") }
-                        IconButton(onClick = { scope.launch { session.lock() } }) { Icon(Icons.Outlined.Lock, "Lock") }
+                        IconButton(onClick = { searching = true }) { Icon(Icons.Outlined.Search, stringResource(Res.string.journal_search)) }
+                        IconButton(onClick = { scope.launch { session.lock() } }) { Icon(Icons.Outlined.Lock, stringResource(Res.string.journal_lock)) }
                     },
                 )
             }
@@ -95,8 +97,8 @@ fun JournalTab(
             EntryList(
                 entries = entries,
                 emptyText = when {
-                    query.isNotBlank() || labelId != null -> "No entries match."
-                    else -> "Nothing here yet.\nTap the button below to write your first entry."
+                    query.isNotBlank() || labelId != null -> stringResource(Res.string.journal_no_match)
+                    else -> stringResource(Res.string.journal_empty)
                 },
                 onOpenEntry = onOpenEntry,
             )
@@ -109,12 +111,12 @@ private fun SearchBar(query: String, onQueryChange: (String) -> Unit, onClose: (
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     TopAppBar(
-        navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close search") } },
+        navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.search_close)) } },
         title = {
             TextField(
                 value = query,
                 onValueChange = onQueryChange,
-                placeholder = { Text("Search entries") },
+                placeholder = { Text(stringResource(Res.string.search_placeholder)) },
                 singleLine = true,
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent,
@@ -126,7 +128,7 @@ private fun SearchBar(query: String, onQueryChange: (String) -> Unit, onClose: (
             )
         },
         actions = {
-            if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Outlined.Close, "Clear") }
+            if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Outlined.Close, stringResource(Res.string.search_clear)) }
         },
     )
 }
@@ -151,9 +153,10 @@ fun EntryList(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             header?.invoke(this)
-            entries.groupBy { it.diaryDate.monthYear() }.forEach { (month, monthEntries) ->
-                item(key = "month-$month") {
-                    Text(month, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
+            // Grouped by month, named in the composition (in the user's language).
+            entries.groupBy { it.diaryDate.year to it.diaryDate.month }.forEach { (month, monthEntries) ->
+                item(key = "month-${month.first}-${month.second}") {
+                    Text(monthEntries.first().diaryDate.monthYear(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 8.dp))
                 }
                 items(monthEntries, key = { it.id }) { entry -> EntryCard(entry, onClick = { onOpenEntry(entry.id) }) }
             }

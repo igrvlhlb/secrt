@@ -40,6 +40,12 @@ import io.github.igrvlhlb.secrt.session.KeySlotsChange
 import io.github.igrvlhlb.secrt.ui.components.AdoptKeySlotsDialog
 import io.github.igrvlhlb.secrt.ui.components.ConfirmDialog
 import io.github.igrvlhlb.secrt.ui.components.adoptedMessage
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.plus
+import io.github.igrvlhlb.secrt.ui.text.string
+import io.github.igrvlhlb.secrt.ui.text.text
+import io.github.igrvlhlb.secrt.ui.text.toUiText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,6 +53,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * The "Cloud backup" row of Settings, and the screen it opens. Its ViewModel lives with the open
@@ -62,13 +69,14 @@ fun CloudBackupRow(session: AppSession) {
     ListItem(
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         leadingContent = { Icon(Icons.Outlined.Cloud, contentDescription = null) },
-        headlineContent = { Text("Cloud backup") },
+        headlineContent = { Text(stringResource(Res.string.backup_title)) },
         supportingContent = {
             Text(
                 when {
-                    state.progress != null -> state.progress!!.label()
-                    config == null -> "Keep an encrypted copy in your Google Drive or on your own server, and sync devices through it"
-                    else -> "${config.description} · " + (state.lastBackupAt?.let { "last backup ${formatTime(it)}" } ?: "not backed up yet")
+                    state.progress != null -> state.progress!!.label().string()
+                    config == null -> stringResource(Res.string.backup_intro)
+                    else -> state.lastBackupAt?.let { text(Res.string.backup_row_last, config.description, UiText.DateTime(it)).string() }
+                        ?: stringResource(Res.string.backup_row_never, config.description)
                 },
             )
         },
@@ -76,7 +84,7 @@ fun CloudBackupRow(session: AppSession) {
     )
     if (open) CloudBackupScreen(vm, onClose = { open = false })
     // Here rather than on the screen: a sync goes on (and may ask) after the screen is closed.
-    state.keySlotsQuestion?.let { change -> AdoptKeySlotsDialog(change, via = "your cloud backup", onAnswer = vm::answerKeySlots) }
+    state.keySlotsQuestion?.let { change -> AdoptKeySlotsDialog(change, via = stringResource(Res.string.key_slots_via_cloud), onAnswer = vm::answerKeySlots) }
 }
 
 @Composable
@@ -87,80 +95,79 @@ private fun CloudBackupScreen(vm: CloudBackupViewModel, onClose: () -> Unit) {
     var confirmDisconnect by remember { mutableStateOf(false) }
     val config = state.config
 
-    FullScreenDialog("Cloud backup", onClose) {
+    FullScreenDialog(stringResource(Res.string.backup_title), onClose) {
         when {
             state.loading -> CircularProgressIndicator()
             config == null && !webDav -> {
-                Text("Where should the backup go?")
+                Text(stringResource(Res.string.backup_where))
                 if (vm.canUseGoogleDrive) {
-                    PrimaryButton("Google Drive", busy = state.connecting, enabled = true, onClick = vm::connectGoogle)
-                    Hint("A hidden folder in your Google Drive that only secrt can open. It counts towards your Google storage.")
+                    PrimaryButton(stringResource(Res.string.backup_google_drive), busy = state.connecting, enabled = true, onClick = vm::connectGoogle)
+                    Hint(stringResource(Res.string.backup_google_drive_hint))
                 }
-                SecondaryButton("Your own server (WebDAV)", enabled = !state.connecting) { vm.clearMessages(); webDav = true }
-                Hint("Nextcloud, a NAS, or any WebDAV server.")
-                state.formError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                SecondaryButton(stringResource(Res.string.backup_webdav), enabled = !state.connecting) { vm.clearMessages(); webDav = true }
+                Hint(stringResource(Res.string.backup_webdav_hint))
+                state.formError?.let { Text(it.string(), color = MaterialTheme.colorScheme.error) }
             }
             config == null || editing -> {
                 val existing = config as? BackupTargetConfig.WebDav
                 var fields by rememberServerFields(existing?.let { ServerFields(it.url, it.username, it.password) } ?: ServerFields())
                 ServerForm(fields, { fields = it }, enabled = !state.connecting, error = state.formError) {
-                    PrimaryButton("Connect", busy = state.connecting, enabled = fields.complete) {
+                    PrimaryButton(stringResource(Res.string.backup_connect), busy = state.connecting, enabled = fields.complete) {
                         vm.connect(fields, save = true) { editing = false }
                     }
-                    SecondaryButton("Test connection", enabled = fields.complete && !state.connecting) { vm.connect(fields, save = false) {} }
+                    SecondaryButton(stringResource(Res.string.backup_test), enabled = fields.complete && !state.connecting) { vm.connect(fields, save = false) {} }
                     if (editing) {
-                        TextButton(onClick = { editing = false; vm.clearMessages() }) { Text("Cancel") }
+                        TextButton(onClick = { editing = false; vm.clearMessages() }) { Text(stringResource(Res.string.action_cancel)) }
                     } else {
-                        TextButton(onClick = { webDav = false; vm.clearMessages() }) { Text("Back") }
+                        TextButton(onClick = { webDav = false; vm.clearMessages() }) { Text(stringResource(Res.string.action_back)) }
                     }
                 }
-                state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+                state.message?.let { Text(it.string(), color = MaterialTheme.colorScheme.primary) }
             }
             else -> {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         when (config) {
-                            is BackupTargetConfig.GoogleDrive -> LabeledValue("Google Drive", config.account)
-                            is BackupTargetConfig.WebDav -> LabeledValue("Server", config.description)
+                            is BackupTargetConfig.GoogleDrive -> LabeledValue(stringResource(Res.string.backup_google_drive), config.account)
+                            is BackupTargetConfig.WebDav -> LabeledValue(stringResource(Res.string.backup_server), config.description)
                         }
-                        LabeledValue("Last backup", state.lastBackupAt?.let(::formatTime) ?: "never, from this device")
+                        LabeledValue(
+                            stringResource(Res.string.backup_last_backup),
+                            state.lastBackupAt?.let { UiText.DateTime(it).string() } ?: stringResource(Res.string.backup_never),
+                        )
                     }
                 }
                 if (config is BackupTargetConfig.WebDav && !config.isEncryptedTransport) {
-                    Notice("This server is reached without https: its password travels unprotected.")
+                    Notice(stringResource(Res.string.backup_insecure_server))
                 }
                 val busy = state.progress != null
-                PrimaryButton("Back up now", busy = busy, enabled = true, onClick = vm::backUp)
-                Hint("Uploads the changes made on this device.")
-                SecondaryButton("Sync now", enabled = !busy, onClick = vm::sync)
-                Hint("Downloads what your other devices backed up, merges it, then uploads this device's changes.")
+                PrimaryButton(stringResource(Res.string.backup_now), busy = busy, enabled = true, onClick = vm::backUp)
+                Hint(stringResource(Res.string.backup_now_hint))
+                SecondaryButton(stringResource(Res.string.action_sync_now), enabled = !busy, onClick = vm::sync)
+                Hint(stringResource(Res.string.backup_sync_hint))
                 state.progress?.let { ProgressCard(it) }
-                state.message?.let { Text(it, color = if (state.messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) }
+                state.message?.let { Text(it.string(), color = if (state.messageIsError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary) }
                 when (config) {
                     is BackupTargetConfig.GoogleDrive ->
-                        TextButton(enabled = !busy && !state.connecting, onClick = vm::connectGoogle) { Text("Use another Google account") }
+                        TextButton(enabled = !busy && !state.connecting, onClick = vm::connectGoogle) { Text(stringResource(Res.string.backup_use_another_account)) }
                     is BackupTargetConfig.WebDav ->
-                        TextButton(enabled = !busy, onClick = { vm.clearMessages(); editing = true }) { Text("Change server or password") }
+                        TextButton(enabled = !busy, onClick = { vm.clearMessages(); editing = true }) { Text(stringResource(Res.string.backup_change_server)) }
                 }
-                TextButton(enabled = !busy, onClick = { confirmDisconnect = true }) { Text("Disconnect") }
+                TextButton(enabled = !busy, onClick = { confirmDisconnect = true }) { Text(stringResource(Res.string.action_disconnect)) }
             }
         }
-        Hint(
-            "Everything is encrypted on this device before it is uploaded: the cloud only stores files it " +
-                "can't read. Restoring on a new device needs your diary password or recovery key.",
-        )
+        Hint(stringResource(Res.string.backup_footer))
     }
 
     if (confirmDisconnect) {
         ConfirmDialog(
-            title = "Disconnect cloud backup?",
+            title = stringResource(Res.string.backup_disconnect_title),
             text = if (config is BackupTargetConfig.GoogleDrive) {
-                "This device stops using ${config.account}. The backup stays in its Google Drive; you can delete it there " +
-                    "under Settings › Manage apps."
+                stringResource(Res.string.backup_disconnect_text_google, config.account)
             } else {
-                "This device forgets the server and its password. The backup stays on the server."
+                stringResource(Res.string.backup_disconnect_text)
             },
-            confirmLabel = "Disconnect",
+            confirmLabel = stringResource(Res.string.action_disconnect),
             destructive = true,
             onConfirm = vm::disconnect,
             onDismiss = { confirmDisconnect = false },
@@ -177,8 +184,8 @@ internal class CloudBackupViewModel(private val session: AppSession, private val
         /** Set while backing up or syncing. */
         val progress: BackupProgress? = null,
         val connecting: Boolean = false,
-        val formError: String? = null,
-        val message: String? = null,
+        val formError: UiText? = null,
+        val message: UiText? = null,
         val messageIsError: Boolean = false,
         /** A sync waits for the user: take on the backup's newer password? See [answerKeySlots]. */
         val keySlotsQuestion: KeySlotsChange? = null,
@@ -212,11 +219,11 @@ internal class CloudBackupViewModel(private val session: AppSession, private val
                     backup.lastBackupAt(target)
                 }
                 backup.saveTarget(config)
-                _state.update { it.copy(config = config, lastBackupAt = last, message = "Connected to ${config.description}", messageIsError = false) }
+                _state.update { it.copy(config = config, lastBackupAt = last, message = text(Res.string.backup_connected, config.description), messageIsError = false) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                val error = e.message ?: "Couldn't connect to Google Drive"
+                val error = e.toUiText(Res.string.backup_google_connect_failed)
                 // Shown where the user is: the choice of provider, or the connected screen.
                 _state.update { if (it.config == null) it.copy(formError = error) else it.copy(message = error, messageIsError = true) }
             } finally {
@@ -236,15 +243,15 @@ internal class CloudBackupViewModel(private val session: AppSession, private val
                 if (save) {
                     backup.saveTarget(config)
                     val last = config.open(google).use { backup.lastBackupAt(it) }
-                    _state.update { it.copy(config = config, lastBackupAt = last, message = "Connected to ${config.description}") }
+                    _state.update { it.copy(config = config, lastBackupAt = last, message = text(Res.string.backup_connected, config.description)) }
                     onSaved()
                 } else {
-                    _state.update { it.copy(message = "The connection works: secrt can write to ${config.url}") }
+                    _state.update { it.copy(message = text(Res.string.backup_connection_works, config.url)) }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(formError = e.message ?: "Couldn't connect") }
+                _state.update { it.copy(formError = e.toUiText(Res.string.backup_connect_failed)) }
             } finally {
                 _state.update { it.copy(connecting = false) }
             }
@@ -274,7 +281,7 @@ internal class CloudBackupViewModel(private val session: AppSession, private val
     fun disconnect() {
         viewModelScope.launch {
             backup.saveTarget(null)
-            _state.update { State(loading = false, message = "Disconnected. The backup is still on the server.") }
+            _state.update { State(loading = false, message = text(Res.string.backup_disconnected)) }
         }
     }
 
@@ -288,15 +295,15 @@ internal class CloudBackupViewModel(private val session: AppSession, private val
             try {
                 val (result, last) = config.open(google).use { target -> action(target) to backup.lastBackupAt(target) }
                 val adopted = session.keySlotsAdopted.value?.also { session.acknowledgeKeySlotsAdopted() }
-                val message = result.summary() + (adopted?.let { " " + it.adoptedMessage() } ?: "")
+                val message = adopted?.let { result.summary() + it.adoptedMessage() } ?: result.summary()
                 _state.update { it.copy(lastBackupAt = last, message = message, messageIsError = false) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: KeySlotsChangeDeclinedException) {
                 // The user's own "no": nothing went wrong.
-                _state.update { it.copy(message = e.message, messageIsError = false) }
+                _state.update { it.copy(message = e.toUiText(), messageIsError = false) }
             } catch (e: Exception) {
-                _state.update { it.copy(message = e.message ?: "The backup failed", messageIsError = true) }
+                _state.update { it.copy(message = e.toUiText(Res.string.backup_failed), messageIsError = true) }
             } finally {
                 _state.update { it.copy(progress = null) }
             }

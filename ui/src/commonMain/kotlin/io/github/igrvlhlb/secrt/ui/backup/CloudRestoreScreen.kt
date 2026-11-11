@@ -37,6 +37,11 @@ import io.github.igrvlhlb.secrt.backup.drive.GoogleSignIn
 import io.github.igrvlhlb.secrt.backup.webdav.WebDavTarget
 import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.ui.auth.PasswordField
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.string
+import io.github.igrvlhlb.secrt.ui.text.text
+import io.github.igrvlhlb.secrt.ui.text.toUiText
 import io.github.igrvlhlb.secrt.vault.Credential
 import io.github.igrvlhlb.secrt.vault.InvalidCredentialsException
 import kotlinx.coroutines.CancellationException
@@ -45,6 +50,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * "Restore from cloud backup" on the welcome screen, and the flow it opens: reach the server,
@@ -57,7 +63,7 @@ fun CloudRestoreButton(session: AppSession) {
     OutlinedButton(onClick = { open = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
         Icon(Icons.Outlined.CloudDownload, contentDescription = null)
         Spacer(Modifier.width(8.dp))
-        Text("Restore from cloud backup")
+        Text(stringResource(Res.string.restore_cloud))
     }
     if (open) {
         val google = rememberGoogleSignIn()
@@ -69,26 +75,26 @@ fun CloudRestoreButton(session: AppSession) {
 @Composable
 private fun CloudRestoreScreen(vm: CloudRestoreViewModel, onClose: () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
-    FullScreenDialog("Restore from cloud backup", onClose = { if (state.progress == null) onClose() }) {
+    FullScreenDialog(stringResource(Res.string.restore_cloud), onClose = { if (state.progress == null) onClose() }) {
         when (val step = state.step) {
             Step.Server -> {
                 var fields by rememberServerFields()
                 if (vm.canUseGoogleDrive) {
-                    PrimaryButton("Find my diary in Google Drive", busy = state.busy && state.searchingGoogle, enabled = !state.busy, onClick = vm::findOnGoogleDrive)
-                    Hint("Or on your own server (WebDAV, Nextcloud):")
+                    PrimaryButton(stringResource(Res.string.restore_cloud_find_google), busy = state.busy && state.searchingGoogle, enabled = !state.busy, onClick = vm::findOnGoogleDrive)
+                    Hint(stringResource(Res.string.restore_cloud_or_server))
                 }
                 ServerForm(fields, { fields = it }, enabled = !state.busy, error = state.error) {
-                    PrimaryButton("Find my diary", busy = state.busy && !state.searchingGoogle, enabled = fields.complete && !state.busy) { vm.findDiaries(fields) }
+                    PrimaryButton(stringResource(Res.string.restore_cloud_find), busy = state.busy && !state.searchingGoogle, enabled = fields.complete && !state.busy) { vm.findDiaries(fields) }
                 }
             }
             is Step.ChooseDiary -> {
-                Text("There are backups of several diaries here. Which one should be restored?")
+                Text(stringResource(Res.string.restore_cloud_choose))
                 step.vaultIds.forEach { id ->
                     Card(Modifier.fillMaxWidth().clickable { vm.choose(id) }) {
-                        ListItem(headlineContent = { Text("Diary ${id.take(8)}") }, supportingContent = { Text(id) })
+                        ListItem(headlineContent = { Text(stringResource(Res.string.restore_cloud_diary, id.take(8))) }, supportingContent = { Text(id) })
                     }
                 }
-                TextButton(onClick = vm::back) { Text("Back") }
+                TextButton(onClick = vm::back) { Text(stringResource(Res.string.action_back)) }
             }
             is Step.Unlock -> {
                 var useRecoveryKey by remember { mutableStateOf(false) }
@@ -98,17 +104,16 @@ private fun CloudRestoreScreen(vm: CloudRestoreViewModel, onClose: () -> Unit) {
                     if (secret.isNotEmpty() && !restoring) vm.restore(if (useRecoveryKey) Credential.RecoveryKey(secret) else Credential.Password(secret))
                 }
                 Text(
-                    if (useRecoveryKey) {
-                        "Enter the recovery key of the diary backed up in ${step.config.description}."
-                    } else {
-                        "Enter the password of the diary backed up in ${step.config.description}. It's the password it had when it was last backed up."
-                    },
+                    stringResource(
+                        if (useRecoveryKey) Res.string.restore_cloud_recovery_hint else Res.string.restore_cloud_password_hint,
+                        step.config.description,
+                    ),
                 )
                 if (useRecoveryKey) {
                     OutlinedTextField(
                         value = secret,
                         onValueChange = { secret = it },
-                        label = { Text("Recovery key") },
+                        label = { Text(stringResource(Res.string.recovery_key)) },
                         placeholder = { Text("XXXX-XXXX-…") },
                         isError = state.error != null,
                         singleLine = true,
@@ -119,15 +124,15 @@ private fun CloudRestoreScreen(vm: CloudRestoreViewModel, onClose: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
-                    PasswordField(secret, { secret = it }, "Diary password", isError = state.error != null, imeAction = ImeAction.Done, onDone = ::submit)
+                    PasswordField(secret, { secret = it }, stringResource(Res.string.restore_cloud_diary_password), isError = state.error != null, imeAction = ImeAction.Done, onDone = ::submit)
                 }
-                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                PrimaryButton("Restore", busy = restoring, enabled = secret.isNotEmpty(), onClick = ::submit)
+                state.error?.let { Text(it.string(), color = MaterialTheme.colorScheme.error) }
+                PrimaryButton(stringResource(Res.string.action_restore), busy = restoring, enabled = secret.isNotEmpty(), onClick = ::submit)
                 state.progress?.let { ProgressCard(it) }
                 TextButton(enabled = !restoring, onClick = { useRecoveryKey = !useRecoveryKey; secret = ""; vm.clearError() }) {
-                    Text(if (useRecoveryKey) "Use password instead" else "Forgot password? Use recovery key")
+                    Text(stringResource(if (useRecoveryKey) Res.string.credential_use_password else Res.string.credential_use_recovery_key))
                 }
-                TextButton(enabled = !restoring, onClick = vm::back) { Text("Back") }
+                TextButton(enabled = !restoring, onClick = vm::back) { Text(stringResource(Res.string.action_back)) }
             }
         }
     }
@@ -148,7 +153,7 @@ internal class CloudRestoreViewModel(session: AppSession, private val google: Go
         val busy: Boolean = false,
         /** The search under way is in Google Drive (not on a WebDAV server). */
         val searchingGoogle: Boolean = false,
-        val error: String? = null,
+        val error: UiText? = null,
         val progress: BackupProgress? = null,
     )
 
@@ -184,7 +189,13 @@ internal class CloudRestoreViewModel(session: AppSession, private val google: Go
                 }
                 _state.update {
                     if (step == null) {
-                        it.copy(error = if (google) "There's no secrt backup in the Google Drive of ${(config as BackupTargetConfig.GoogleDrive).account}" else "There's no secrt backup in this folder yet")
+                        it.copy(
+                            error = if (google) {
+                                text(Res.string.restore_cloud_none_google, (config as BackupTargetConfig.GoogleDrive).account)
+                            } else {
+                                text(Res.string.restore_cloud_none)
+                            },
+                        )
                     } else {
                         it.copy(step = step)
                     }
@@ -192,7 +203,7 @@ internal class CloudRestoreViewModel(session: AppSession, private val google: Go
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message ?: "Couldn't connect") }
+                _state.update { it.copy(error = e.toUiText(Res.string.backup_connect_failed)) }
             } finally {
                 _state.update { it.copy(busy = false) }
             }
@@ -224,9 +235,11 @@ internal class CloudRestoreViewModel(session: AppSession, private val google: Go
             } catch (e: CancellationException) {
                 throw e
             } catch (e: InvalidCredentialsException) {
-                _state.update { it.copy(error = if (credential is Credential.RecoveryKey) "That recovery key doesn't match" else "Wrong password") }
+                _state.update {
+                    it.copy(error = text(if (credential is Credential.RecoveryKey) Res.string.credential_wrong_recovery_key else Res.string.credential_wrong_password))
+                }
             } catch (e: Exception) {
-                _state.update { it.copy(error = e.message ?: "The restore failed") }
+                _state.update { it.copy(error = e.toUiText(Res.string.restore_cloud_failed)) }
             } finally {
                 _state.update { it.copy(progress = null) }
             }

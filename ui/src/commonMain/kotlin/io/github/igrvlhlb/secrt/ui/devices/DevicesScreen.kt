@@ -58,10 +58,14 @@ import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.storage.Peer
 import io.github.igrvlhlb.secrt.ui.components.ConfirmDialog
 import io.github.igrvlhlb.secrt.ui.components.readableWidth
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.resolve
+import io.github.igrvlhlb.secrt.ui.text.string
+import io.github.igrvlhlb.secrt.ui.text.toUiText
+import org.jetbrains.compose.resources.pluralStringResource
+import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
-import kotlin.time.Instant
 
 /**
  * Paired devices and how to pair more. The screen being open is what makes this device listen for
@@ -75,11 +79,11 @@ fun DevicesScreen(lan: LanSync, session: AppSession, store: DiaryStore, onBack: 
     val snackbar = remember { SnackbarHostState() }
     var scanning by remember { mutableStateOf(false) }
     var forgetting by remember { mutableStateOf<Peer?>(null) }
-    LaunchedEffect(vm) { vm.snackbar.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(vm) { vm.snackbar.collect { snackbar.showSnackbar(it.resolve()) } }
 
     if (scanning) {
         ScanScreen(
-            instructions = "Point the camera at the code on your other device (in secrt there: Settings → Devices → Show a code).",
+            instructions = stringResource(Res.string.devices_scan_instructions),
             onScanned = { scanning = false; vm.pair(it) },
             onBack = { scanning = false },
         )
@@ -89,8 +93,8 @@ fun DevicesScreen(lan: LanSync, session: AppSession, store: DiaryStore, onBack: 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Devices") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                title = { Text(stringResource(Res.string.devices_title)) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.action_back)) } },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -101,14 +105,10 @@ fun DevicesScreen(lan: LanSync, session: AppSession, store: DiaryStore, onBack: 
         ) {
             SyncSection(vm.host, canScan = canScanCodes, onShowCode = vm::showCode, onHideCode = vm::hideCode, onScan = { scanning = true })
 
-            Text("Paired devices", style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(Res.string.devices_paired), style = MaterialTheme.typography.titleMedium)
             if (peers.isEmpty()) {
                 Text(
-                    if (canScanCodes) {
-                        "None yet. Pair with secrt on your other devices to keep this diary in sync with them."
-                    } else {
-                        "None yet. Pair your phone with a code from above."
-                    },
+                    stringResource(if (canScanCodes) Res.string.devices_none_scanner else Res.string.devices_none_computer),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else {
@@ -139,7 +139,7 @@ fun DevicesScreen(lan: LanSync, session: AppSession, store: DiaryStore, onBack: 
             text = {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     CircularProgressIndicator(Modifier.size(24.dp))
-                    Text(label)
+                    Text(label.string())
                 }
             },
             confirmButton = {},
@@ -148,16 +148,16 @@ fun DevicesScreen(lan: LanSync, session: AppSession, store: DiaryStore, onBack: 
     vm.notice?.let { notice ->
         AlertDialog(
             onDismissRequest = { vm.notice = null },
-            title = { Text(notice.title) },
-            text = { Text(notice.text) },
-            confirmButton = { TextButton(onClick = { vm.notice = null }) { Text("OK") } },
+            title = { Text(notice.title.string()) },
+            text = { Text(notice.text.string()) },
+            confirmButton = { TextButton(onClick = { vm.notice = null }) { Text(stringResource(Res.string.action_ok)) } },
         )
     }
     forgetting?.let { peer ->
         ConfirmDialog(
-            title = "Forget ${peer.name}?",
-            text = "It won't be able to sync with this device until you pair them again. Nothing is deleted from either diary.",
-            confirmLabel = "Forget",
+            title = stringResource(Res.string.devices_forget_title, peer.name),
+            text = stringResource(Res.string.devices_forget_text),
+            confirmLabel = stringResource(Res.string.action_forget),
             destructive = true,
             onConfirm = { vm.forget(peer) },
             onDismiss = { forgetting = null },
@@ -182,9 +182,9 @@ private fun SyncSection(host: LanHost, canScan: Boolean, onShowCode: () -> Unit,
             headlineContent = {
                 Text(
                     when (status) {
-                        LanHost.Status.Starting -> "Starting…"
-                        is LanHost.Status.Listening -> "Ready to sync"
-                        is LanHost.Status.Failed -> "Can't sync right now"
+                        LanHost.Status.Starting -> stringResource(Res.string.devices_starting)
+                        is LanHost.Status.Listening -> stringResource(Res.string.devices_ready)
+                        is LanHost.Status.Failed -> stringResource(Res.string.devices_cant_sync)
                     },
                 )
             },
@@ -193,15 +193,10 @@ private fun SyncSection(host: LanHost, canScan: Boolean, onShowCode: () -> Unit,
                     when (val s = status) {
                         LanHost.Status.Starting -> ""
                         is LanHost.Status.Listening if canScan ->
-                            "Your diary syncs directly with secrt on your other devices, encrypted, without any server. " +
-                                "To pair, scan the code another device shows, or show this one's code to a phone. While " +
-                                "this screen is open, paired devices can also sync with this one. Both must be on the " +
-                                "same Wi-Fi. This device: ${s.addresses.joinToString()}, port ${s.port}."
+                            stringResource(Res.string.devices_listening_scanner, s.addresses.joinToString(), s.port)
                         is LanHost.Status.Listening ->
-                            "While this screen is open, your paired phone can sync with this computer: tap Sync now in " +
-                                "secrt on the phone (Settings → Devices). Both must be on the same Wi-Fi. " +
-                                "This computer: ${s.addresses.joinToString()}, port ${s.port}."
-                        is LanHost.Status.Failed -> s.message
+                            stringResource(Res.string.devices_listening_computer, s.addresses.joinToString(), s.port)
+                        is LanHost.Status.Failed -> s.toUiText().string()
                     },
                 )
             },
@@ -211,9 +206,7 @@ private fun SyncSection(host: LanHost, canScan: Boolean, onShowCode: () -> Unit,
             Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                 PairingCodeCard(
                     invite = invite,
-                    instructions = "In secrt on your phone, open Settings → Devices → Scan a code, and scan this one. A new " +
-                        "phone can scan it from \"Set up from another device\" on its first screen to receive this diary, " +
-                        "still encrypted, once you confirm here.",
+                    instructions = stringResource(Res.string.devices_code_instructions),
                     onNewCode = onShowCode,
                     onCancel = { codeShown = false; onHideCode() },
                 )
@@ -225,7 +218,7 @@ private fun SyncSection(host: LanHost, canScan: Boolean, onShowCode: () -> Unit,
                     Button(onClick = onScan) {
                         Icon(Icons.Outlined.QrCodeScanner, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Scan a code")
+                        Text(stringResource(Res.string.devices_scan_code))
                     }
                 }
                 if (listening) {
@@ -233,7 +226,7 @@ private fun SyncSection(host: LanHost, canScan: Boolean, onShowCode: () -> Unit,
                     val content: @Composable () -> Unit = {
                         Icon(Icons.Outlined.QrCode2, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Show a code")
+                        Text(stringResource(Res.string.devices_show_code))
                     }
                     // Scanning is the usual way on a phone; on a computer, showing is the only one.
                     if (canScan) OutlinedButton(onClick = showCode) { content() } else Button(onClick = showCode) { content() }
@@ -250,8 +243,9 @@ private fun PeerRow(peer: Peer, canSync: Boolean, syncing: Boolean, onSync: () -
         leadingContent = { Icon(Icons.Outlined.Devices, contentDescription = null) },
         headlineContent = { Text(peer.name) },
         supportingContent = {
-            val lastSync = peer.lastSyncAt?.let { "Last synced ${formatTime(it)}" } ?: "Not synced yet"
-            Text(if (canSync) lastSync else "$lastSync. Syncs start on ${peer.name}.")
+            val lastSync = peer.lastSyncAt?.let { stringResource(Res.string.devices_last_synced, formatTime(it)) }
+                ?: stringResource(Res.string.devices_not_synced)
+            Text(if (canSync) lastSync else stringResource(Res.string.devices_syncs_start_there, lastSync, peer.name))
         },
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -262,11 +256,11 @@ private fun PeerRow(peer: Peer, canSync: Boolean, syncing: Boolean, onSync: () -
                         TextButton(onClick = onSync) {
                             Icon(Icons.Outlined.Sync, contentDescription = null)
                             Spacer(Modifier.width(4.dp))
-                            Text("Sync now")
+                            Text(stringResource(Res.string.action_sync_now))
                         }
                     }
                 }
-                IconButton(onClick = onForget, enabled = !syncing) { Icon(Icons.Outlined.Delete, contentDescription = "Forget ${peer.name}") }
+                IconButton(onClick = onForget, enabled = !syncing) { Icon(Icons.Outlined.Delete, contentDescription = stringResource(Res.string.devices_forget_device, peer.name)) }
             }
         },
     )
@@ -277,8 +271,8 @@ internal fun ScanScreen(instructions: String, onScanned: (String) -> Unit, onBac
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Scan the pairing code") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                title = { Text(stringResource(Res.string.devices_scan_title)) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.action_back)) } },
             )
         },
     ) { padding ->
@@ -290,14 +284,12 @@ internal fun ScanScreen(instructions: String, onScanned: (String) -> Unit, onBac
     }
 }
 
+@Composable
 private fun formatTime(millis: Long): String {
     val elapsed = Clock.System.now().toEpochMilliseconds() - millis
     return when {
-        elapsed < 60_000 -> "just now"
-        elapsed < 3_600_000 -> "${elapsed / 60_000} min ago"
-        else -> {
-            val time = Instant.fromEpochMilliseconds(millis).toLocalDateTime(TimeZone.currentSystemDefault())
-            "${time.date} ${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}"
-        }
+        elapsed < 60_000 -> stringResource(Res.string.time_just_now)
+        elapsed < 3_600_000 -> (elapsed / 60_000).toInt().let { pluralStringResource(Res.plurals.time_minutes_ago, it, it) }
+        else -> UiText.DateTime(millis).string()
     }
 }
