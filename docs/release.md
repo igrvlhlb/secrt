@@ -23,6 +23,9 @@ keytool -genkeypair -keystore /path/to/upload-keystore.jks -alias secrt \
 Back the keystore up somewhere safe. If the upload key is lost or leaks, Play's support can reset
 it; the app signing key stays with Google.
 
+Debug builds are a separate app, `io.github.igrvlhlb.secrt.debug`, named "secrt-debug" on the
+launcher, so they install next to a release build, each with its own data.
+
 ## Signing the build
 
 The build reads four Gradle properties. Keep them outside the repository, in
@@ -75,12 +78,12 @@ Play and F-Droid refuse a version code they already have.
 
 Google lets an app sign in for Drive only if its package name and the SHA-1 of the certificate it
 was signed with match an Android OAuth client in secrt's Google Cloud project. Each certificate
-needs its own Android client (Google Auth Platform → Clients → Create client → Android, package
-`io.github.igrvlhlb.secrt`):
+and package needs its own Android client (Google Auth Platform → Clients → Create client →
+Android, package `io.github.igrvlhlb.secrt`, or `io.github.igrvlhlb.secrt.debug` for debug builds):
 
 | Certificate | Where to find its SHA-1 | Needed for |
 |---|---|---|
-| Debug key (this machine's `~/.android/debug.keystore`) | `keytool -list -v -keystore ~/.android/debug.keystore -storepass android` | `installDebug` |
+| Debug key (this machine's `~/.android/debug.keystore`) | `keytool -list -v -keystore ~/.android/debug.keystore -storepass android` | `installDebug` (package `io.github.igrvlhlb.secrt.debug`) |
 | Play's app signing key | Play Console → Test and release → App integrity → App signing | Installs from Play |
 | Your upload key | `keytool -list -v -keystore /path/to/upload-keystore.jks -alias secrt` | Signed release builds you install yourself |
 

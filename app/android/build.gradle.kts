@@ -13,6 +13,7 @@ android {
         targetSdk = libs.versions.android.targetSdk.get().toInt()
         versionCode = 1
         versionName = "0.1.0"
+        manifestPlaceholders["appLabel"] = "secrt"
     }
 
     // Release signing, from Gradle properties kept outside the repo (~/.gradle/gradle.properties, or
@@ -36,6 +37,12 @@ android {
     }
 
     buildTypes {
+        // A separate app, so a debug build installs next to the release one instead of over it:
+        // its own package (and data), and its own name on the launcher.
+        debug {
+            applicationIdSuffix = ".debug"
+            manifestPlaceholders["appLabel"] = "secrt-debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
