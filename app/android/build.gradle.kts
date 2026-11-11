@@ -37,8 +37,9 @@ android {
 
     buildTypes {
         release {
-            // R8 rules for JNA (libsodium) and SQLCipher are still to be written (see BACKLOG.md).
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = releaseSigning
         }
     }

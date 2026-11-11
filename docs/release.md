@@ -44,5 +44,29 @@ On CI, pass them on the command line instead (`-Psecrt.signing.storeFile=…`), 
   F-Droid builds.
 - With only some of them set, the build stops and names the missing ones.
 
+## Shrinking (R8)
+
+The release build is shrunk and optimized by R8 (`isMinifyEnabled`, `isShrinkResources`). R8 only
+keeps what it can see being used, so code reached by name at runtime needs keep rules. Most
+libraries ship theirs (SQLCipher, kotlinx-serialization, coroutines, Ktor, CameraX); the ones that
+don't are in `app/android/proguard-rules.pro`. Today that is JNA, through which the libsodium
+bindings call the native library: shrink it and creating or unlocking a diary fails.
+
+What R8 breaks only shows when the app runs, so try a release build before shipping one, and after
+adding a library that uses reflection, JNI or JNA. To install it next to the real app without
+touching its data, build it once with, in `buildTypes.release`, the debug key and another package
+(don't commit these):
+
+```
+signingConfig = signingConfigs.getByName("debug")
+applicationIdSuffix = ".r8test"
+```
+
+Then go through creating a diary, unlocking it (password and recovery key), writing, searching,
+export and import, cloud backup and pairing. Google sign-in won't work under the other package
+unless it has its own Android client. Crashes show in `adb logcat`; R8's
+`app/android/build/outputs/mapping/release/mapping.txt` turns the renamed names in a stack trace
+back into the real ones (`retrace`). Keep that file for every release you ship.
+
 Raise `versionCode` (and `versionName`) in `app/android/build.gradle.kts` for every release:
 Play and F-Droid refuse a version code they already have.
