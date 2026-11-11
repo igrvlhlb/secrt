@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Texts Android shows outside the Compose UI (the system's fingerprint prompt). The app's own
+    texts live in ui/src/commonMain/composeResources; see docs/architecture.md, "Languages".
+-->
+<resources>
+    <string name="biometric_enable_title">Turn on fingerprint unlock</string>
+    <string name="biometric_enable_subtitle">Confirm with your fingerprint</string>
+    <string name="biometric_enable_negative">Cancel</string>
+    <string name="biometric_unlock_title">Unlock your diary</string>
+    <string name="biometric_unlock_subtitle">Use your fingerprint</string>
+    <string name="biometric_unlock_negative">Use password</string>
+</resources>

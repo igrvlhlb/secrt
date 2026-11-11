@@ -2,9 +2,21 @@ plugins {
     id("secrt.kmp-library")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    // Compose resources: the app's texts and their translations (docs/architecture.md, "Languages").
+    id("org.jetbrains.compose")
+}
+
+compose.resources {
+    packageOfResClass = "io.github.igrvlhlb.secrt.ui.resources"
+    publicResClass = false
+    generateResClass = always
 }
 
 kotlin {
+    android {
+        // Packs the Compose resources (texts and translations) into the app.
+        androidResources.enable = true
+    }
     sourceSets {
         commonMain.dependencies {
             api(projects.core.session)
@@ -35,6 +47,10 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlinx.coroutines.test)
+        }
+        jvmTest.dependencies {
+            // Skiko's native part: resolving texts outside composition asks it for the system theme.
+            implementation(compose.desktop.currentOs)
         }
     }
 }

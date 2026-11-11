@@ -1,12 +1,15 @@
 package io.github.igrvlhlb.secrt.android
 
 import android.app.Application
+import android.content.Context
 import android.os.Build
 import android.provider.Settings
 import io.github.igrvlhlb.secrt.crypto.SodiumCrypto
 import io.github.igrvlhlb.secrt.lan.LanSync
 import io.github.igrvlhlb.secrt.session.AndroidBiometricKeyStore
 import io.github.igrvlhlb.secrt.session.AppSession
+import io.github.igrvlhlb.secrt.session.BiometricPromptText
+import io.github.igrvlhlb.secrt.session.BiometricPurpose
 import io.github.igrvlhlb.secrt.storage.SqlCipherDriverFactory
 import io.github.igrvlhlb.secrt.ui.AutoLock
 import kotlinx.coroutines.CoroutineScope
@@ -20,7 +23,7 @@ class SecrtApplication : Application() {
 
     val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    val biometrics: AndroidBiometricKeyStore by lazy { AndroidBiometricKeyStore(this) }
+    val biometrics: AndroidBiometricKeyStore by lazy { AndroidBiometricKeyStore(this, promptText = ::biometricPromptText) }
 
     val session: AppSession by lazy {
         AppSession(
@@ -56,6 +59,20 @@ class SecrtApplication : Application() {
 
     /** Google Drive backup: Google's screens are shown from the current activity. */
     val google: AndroidGoogleSignIn by lazy { AndroidGoogleSignIn(this) }
+
+    /** The fingerprint prompt's texts, in the app's language ([context] is the activity it shows over). */
+    private fun biometricPromptText(context: Context, purpose: BiometricPurpose): BiometricPromptText = when (purpose) {
+        BiometricPurpose.Enable -> BiometricPromptText(
+            context.getString(R.string.biometric_enable_title),
+            context.getString(R.string.biometric_enable_subtitle),
+            context.getString(R.string.biometric_enable_negative),
+        )
+        BiometricPurpose.Unlock -> BiometricPromptText(
+            context.getString(R.string.biometric_unlock_title),
+            context.getString(R.string.biometric_unlock_subtitle),
+            context.getString(R.string.biometric_unlock_negative),
+        )
+    }
 
     /** Per process, not per activity: its timer must survive the activity being recreated or closed. */
     val autoLock: AutoLock by lazy { AutoLock(session, backgroundScope) }

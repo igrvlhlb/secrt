@@ -1,29 +1,52 @@
 package io.github.igrvlhlb.secrt.ui.components
 
+import androidx.compose.runtime.Composable
 import io.github.igrvlhlb.secrt.model.Folder
+import io.github.igrvlhlb.secrt.ui.resources.Res
+import io.github.igrvlhlb.secrt.ui.resources.format_date_long
+import io.github.igrvlhlb.secrt.ui.resources.format_month_year
+import io.github.igrvlhlb.secrt.ui.resources.format_weekday_short
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.atTime
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.datetime.todayIn
+import org.jetbrains.compose.resources.stringResource
 import kotlin.time.Clock
 import kotlin.time.Instant
 
 fun today(): LocalDate = Clock.System.todayIn(TimeZone.currentSystemDefault())
 
-private fun String.titleCase() = lowercase().replaceFirstChar { it.uppercase() }
+/**
+ * [dateTime] formatted with a `java.time` [pattern] (each language has its own, in the string
+ * resources), with month and weekday names in the device's language.
+ */
+internal expect fun formatPattern(dateTime: LocalDateTime, pattern: String): String
 
-fun LocalDate.weekdayShort(): String = dayOfWeek.name.titleCase().take(3)
+/** Sentence case: "ter." becomes "Ter.", while "Tue" stays as is. */
+private fun String.capitalized() = replaceFirstChar { it.uppercase() }
 
-fun LocalDate.monthYear(): String = "${month.name.titleCase()} $year"
+/** E.g. "Tue". */
+@Composable
+fun LocalDate.weekdayShort(): String =
+    formatPattern(atTime(0, 0), stringResource(Res.string.format_weekday_short)).removeSuffix(".").capitalized()
 
-fun LocalDate.longFormat(): String = "${weekdayShort()}, $day ${month.name.titleCase().take(3)} $year"
+/** E.g. "November 2026". */
+@Composable
+fun LocalDate.monthYear(): String = formatPattern(atTime(0, 0), stringResource(Res.string.format_month_year)).capitalized()
 
-/** E.g. "Sun, 8 Nov 2026, 10:05", in this device's time zone. */
-fun formatDateTime(epochMillis: Long): String {
-    val time = Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(TimeZone.currentSystemDefault())
-    return "${time.date.longFormat()}, ${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}"
-}
+/** E.g. "Tue, 10 Nov 2026". */
+@Composable
+fun LocalDate.longFormat(): String = formatPattern(atTime(0, 0), stringResource(Res.string.format_date_long)).capitalized()
+
+/**
+ * E.g. "Sun, 8 Nov 2026, 10:05" with [pattern] `format_date_time`, in this device's time zone.
+ * Not capitalized: it usually goes mid-sentence.
+ */
+fun formatDateTime(epochMillis: Long, pattern: String): String =
+    formatPattern(Instant.fromEpochMilliseconds(epochMillis).toLocalDateTime(TimeZone.currentSystemDefault()), pattern)
 
 /** Material date pickers work in UTC milliseconds. */
 fun LocalDate.toPickerMillis(): Long = atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()

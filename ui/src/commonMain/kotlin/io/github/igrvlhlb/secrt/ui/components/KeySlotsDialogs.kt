@@ -5,6 +5,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import io.github.igrvlhlb.secrt.session.KeySlotsChange
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.string
+import io.github.igrvlhlb.secrt.ui.text.text
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * Asks whether to take on a newer password (or recovery key) set on another device, which a sync
@@ -15,22 +20,17 @@ import io.github.igrvlhlb.secrt.session.KeySlotsChange
 fun AdoptKeySlotsDialog(change: KeySlotsChange, via: String, onAnswer: (Boolean) -> Unit) {
     AlertDialog(
         onDismissRequest = { onAnswer(false) },
-        title = { Text("Use the newer password?") },
-        text = {
-            Text(
-                "Your diary's password or recovery key was changed ${change.where()}. To sync with $via, this " +
-                    "device takes that change on: from the next time you unlock it, it opens with the password " +
-                    "set there, not the current one. Your diary stays open now, and fingerprint unlock keeps " +
-                    "working.\n\nIf you don't recognize this change, don't sync.",
-            )
-        },
-        confirmButton = { TextButton(onClick = { onAnswer(true) }) { Text("Sync") } },
-        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text("Don't sync") } },
+        title = { Text(stringResource(Res.string.key_slots_title)) },
+        text = { Text(stringResource(Res.string.key_slots_text, change.where().string(), via)) },
+        confirmButton = { TextButton(onClick = { onAnswer(true) }) { Text(stringResource(Res.string.key_slots_sync)) } },
+        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text(stringResource(Res.string.key_slots_dont_sync)) } },
     )
 }
 
 /** What to tell the user once [change] was taken on (see [io.github.igrvlhlb.secrt.session.AppSession.keySlotsAdopted]). */
-fun KeySlotsChange.adoptedMessage(): String =
-    "From your next unlock, this device opens with the password set ${where()}."
+fun KeySlotsChange.adoptedMessage(): UiText = text(Res.string.key_slots_adopted, where())
 
-private fun KeySlotsChange.where(): String = "on ${changedOn?.let { "\"$it\"" } ?: "another device"} (${formatDateTime(changedAt)})"
+private fun KeySlotsChange.where(): UiText {
+    val time = UiText.DateTime(changedAt)
+    return changedOn?.let { text(Res.string.key_slots_on_device, it, time) } ?: text(Res.string.key_slots_on_another_device, time)
+}

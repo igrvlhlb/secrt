@@ -34,7 +34,11 @@ import io.github.igrvlhlb.secrt.ui.components.FolderPickerDialog
 import io.github.igrvlhlb.secrt.ui.components.TextInputDialog
 import io.github.igrvlhlb.secrt.ui.components.descendantsOf
 import io.github.igrvlhlb.secrt.ui.components.pathTo
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.resolve
+import io.github.igrvlhlb.secrt.ui.text.toUiText
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
 
 private sealed interface FolderDialog {
     data object Create : FolderDialog
@@ -62,7 +66,7 @@ fun FoldersTab(store: DiaryStore, onOpenEntry: (String) -> Unit, onNewEntry: (fo
             try {
                 action()
             } catch (e: Exception) {
-                snackbar.showSnackbar(e.message ?: "Something went wrong")
+                snackbar.showSnackbar(e.toUiText().resolve())
             }
         }
     }
@@ -70,13 +74,13 @@ fun FoldersTab(store: DiaryStore, onOpenEntry: (String) -> Unit, onNewEntry: (fo
     TabScaffold(
         topBar = {
             TopAppBar(
-                title = { Text(path.joinToString(" / ") { it.name }.ifEmpty { "Folders" }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = { Text(path.joinToString(" / ") { it.name }.ifEmpty { stringResource(Res.string.tab_folders) }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     if (current != null) {
-                        IconButton(onClick = { vm.currentFolderId.value = current.parentId }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Up") }
+                        IconButton(onClick = { vm.currentFolderId.value = current.parentId }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.folders_up)) }
                     }
                 },
-                actions = { IconButton(onClick = { dialog = FolderDialog.Create }) { Icon(Icons.Outlined.CreateNewFolder, "New folder") } },
+                actions = { IconButton(onClick = { dialog = FolderDialog.Create }) { Icon(Icons.Outlined.CreateNewFolder, stringResource(Res.string.folders_new)) } },
             )
         },
         fab = { NewEntryFab { onNewEntry(current?.id) } },
@@ -99,7 +103,7 @@ fun FoldersTab(store: DiaryStore, onOpenEntry: (String) -> Unit, onNewEntry: (fo
                 if (subfolders.isEmpty() && entries?.isEmpty() == true) {
                     item {
                         Text(
-                            if (current == null) "Organize entries in folders. Create one with the button above." else "This folder is empty.",
+                            stringResource(if (current == null) Res.string.folders_empty_root else Res.string.folders_empty),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -110,10 +114,10 @@ fun FoldersTab(store: DiaryStore, onOpenEntry: (String) -> Unit, onNewEntry: (fo
 
     when (val d = dialog) {
         null -> Unit
-        FolderDialog.Create -> TextInputDialog("New folder", "", "Create", { name -> run { store.createFolder(name, current?.id) } }, { dialog = null })
-        is FolderDialog.Rename -> TextInputDialog("Rename folder", d.folder.name, "Rename", { name -> run { store.renameFolder(d.folder.id, name) } }, { dialog = null })
+        FolderDialog.Create -> TextInputDialog(stringResource(Res.string.folders_new), "", stringResource(Res.string.action_create), { name -> run { store.createFolder(name, current?.id) } }, { dialog = null })
+        is FolderDialog.Rename -> TextInputDialog(stringResource(Res.string.folders_rename), d.folder.name, stringResource(Res.string.action_rename), { name -> run { store.renameFolder(d.folder.id, name) } }, { dialog = null })
         is FolderDialog.Move -> FolderPickerDialog(
-            title = "Move \"${d.folder.name}\" to",
+            title = stringResource(Res.string.folders_move_title, d.folder.name),
             folders = folders,
             selected = d.folder.parentId,
             excluded = descendantsOf(d.folder.id, folders) + d.folder.id,
@@ -121,9 +125,13 @@ fun FoldersTab(store: DiaryStore, onOpenEntry: (String) -> Unit, onNewEntry: (fo
             onDismiss = { dialog = null },
         )
         is FolderDialog.Delete -> ConfirmDialog(
-            title = "Delete \"${d.folder.name}\"?",
-            text = "Its entries and subfolders will move to ${folders.firstOrNull { it.id == d.folder.parentId }?.name?.let { "\"$it\"" } ?: "the top level"}.",
-            confirmLabel = "Delete",
+            title = stringResource(Res.string.folders_delete_title, d.folder.name),
+            text = stringResource(
+                Res.string.folders_delete_text,
+                folders.firstOrNull { it.id == d.folder.parentId }?.name?.let { stringResource(Res.string.folders_delete_into_named, it) }
+                    ?: stringResource(Res.string.folders_delete_into_top),
+            ),
+            confirmLabel = stringResource(Res.string.action_delete),
             destructive = true,
             onConfirm = { run { store.deleteFolder(d.folder.id) } },
             onDismiss = { dialog = null },
@@ -141,11 +149,11 @@ private fun FolderRow(folder: Folder, onOpen: () -> Unit, onRename: () -> Unit, 
             headlineContent = { Text(folder.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             trailingContent = {
                 Box {
-                    IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "Folder options") }
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, stringResource(Res.string.folders_options)) }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
-                        DropdownMenuItem(text = { Text("Move") }, onClick = { menu = false; onMove() })
-                        DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
+                        DropdownMenuItem(text = { Text(stringResource(Res.string.action_rename)) }, onClick = { menu = false; onRename() })
+                        DropdownMenuItem(text = { Text(stringResource(Res.string.action_move)) }, onClick = { menu = false; onMove() })
+                        DropdownMenuItem(text = { Text(stringResource(Res.string.action_delete)) }, onClick = { menu = false; onDelete() })
                     }
                 }
             },

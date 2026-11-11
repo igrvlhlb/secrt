@@ -339,6 +339,39 @@ hook doesn't exist there.
 **Not done yet** (see BACKLOG.md): numeric-code pairing with a PAKE, mDNS discovery, the computer
 starting a sync, computer ↔ computer, iOS.
 
+## Languages
+English (the default) and Brazilian Portuguese. The app follows the system language: on Android,
+the device's or, from Android 13, the per-app one (`res/xml/locales_config.xml`); on the desktop,
+the JVM's default locale (from the OS). Any other language falls back to English.
+
+- **Texts** are Compose Multiplatform resources in the `ui` module:
+  `ui/src/commonMain/composeResources/values/strings.xml` (English) and one `values-<language>`
+  folder per translation (`values-pt-rBR`). Screens use `stringResource(Res.string.…)`; counts use
+  `<plurals>` and `pluralStringResource`. `Res` is generated, internal to `ui`.
+- **Messages from ViewModels** are `UiText` (`ui/text/UiText.kt`): a resource plus its arguments,
+  resolved when shown (`string()` in composition, `resolve()` for snackbars), so they follow a
+  language change.
+- **Errors from the core modules**: `core/*` has no translations. Its exceptions are typed and carry
+  what the message needs as fields (`LanException.Declined(reason, deviceName)`,
+  `BackupServerException(problem, path, action, status)`, `BiometricException.Failed(reason)`,
+  `GoogleAuthException(reason)`, `GoogleDriveException(problem, …)`, …); their `message` stays in
+  English for logs and tests. `Throwable.toUiText()`
+  (`ui/text/ErrorMessages.kt`) maps each type to its text. An exception it doesn't know shows its
+  own message (often from the system). `StringsTest` checks that each mapped error reads the same
+  in English as its message.
+- **Dates** are `java.time` patterns kept as strings (`format_date_long`, …), so each language
+  orders day, month and year its own way; month and weekday names come from the locale.
+- **Outside Compose**: the system fingerprint prompt's texts are Android resources in `app/android`
+  (`values/strings.xml`, `values-pt-rBR/strings.xml`), passed to `AndroidBiometricKeyStore`; the
+  desktop's "already open" dialog and the browser page after Google sign-in use `DesktopTexts`.
+  The name "secrt" is never translated.
+
+To add a language: copy `values/strings.xml` to `values-<language>` (e.g. `values-es`, or
+`values-pt-rBR` for a region) in both `ui/src/commonMain/composeResources` and
+`app/android/src/main/res`, translate it (date patterns included), and add the language to
+`locales_config.xml`. `./gradlew :ui:jvmTest` (`StringsTest`) fails if a text or placeholder is
+missing.
+
 ## Module layout
 ```
 build-logic/        convention plugins

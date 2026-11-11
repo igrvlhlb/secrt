@@ -11,7 +11,10 @@ enum class BiometricAvailability {
     Unsupported,
 }
 
-/** Why biometric unlock didn't produce a key. The diary can always be opened with the password. */
+/**
+ * Why biometric unlock didn't produce a key. The diary can always be opened with the password.
+ * Messages are in English, for logs and tests; the UI shows its own (translated) text for each reason.
+ */
 sealed class BiometricException(message: String) : Exception(message) {
     /** The user dismissed the prompt or chose the password instead. Not worth a message. */
     class Cancelled : BiometricException("Cancelled")
@@ -20,10 +23,26 @@ sealed class BiometricException(message: String) : Exception(message) {
      * The stored key can never be used again (new fingerprint enrolled, biometrics or the screen
      * lock removed, or it doesn't match this diary). The feature has been turned off.
      */
-    class KeyInvalidated(message: String) : BiometricException(message)
+    class KeyInvalidated(val reason: Reason) : BiometricException(reason.english) {
+        enum class Reason(internal val english: String) {
+            FingerprintsChanged("Your fingerprints changed, so fingerprint unlock was turned off. Use your password, then turn it on again in Settings."),
+            Damaged("Fingerprint unlock stopped working and was turned off. Use your password."),
+            OtherDiary("The saved fingerprint key doesn't belong to this diary"),
+        }
+    }
 
-    /** Anything else, e.g. too many attempts. [message] is meant for the user. */
-    class Failed(message: String) : BiometricException(message)
+    /**
+     * Anything else, e.g. too many attempts. For [Reason.System], [message] is the system's own
+     * explanation, already in the user's language.
+     */
+    class Failed(val reason: Reason, systemMessage: String? = null) : BiometricException(systemMessage ?: reason.english) {
+        enum class Reason(internal val english: String) {
+            EnableFailed("Couldn't turn on fingerprint unlock"),
+            NotWorking("Fingerprint unlock isn't working right now. Use your password."),
+            PromptFailed("Fingerprint unlock failed"),
+            System("Fingerprint unlock failed"),
+        }
+    }
 }
 
 /**

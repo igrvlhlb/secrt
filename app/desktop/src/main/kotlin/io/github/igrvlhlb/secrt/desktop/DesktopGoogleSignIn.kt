@@ -4,6 +4,7 @@ import io.github.igrvlhlb.secrt.backup.BackupTargetConfig
 import io.github.igrvlhlb.secrt.backup.drive.GoogleAuthException
 import io.github.igrvlhlb.secrt.backup.drive.GoogleOAuthClient
 import io.github.igrvlhlb.secrt.backup.drive.GoogleSignIn
+import io.github.igrvlhlb.secrt.ui.DesktopTexts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -56,16 +57,16 @@ class DesktopGoogleSignIn(private val oauth: GoogleOAuthClient) : GoogleSignIn {
             val state = randomToken(16)
             openInBrowser(oauth.authorizationUrl(redirectUri, state, challenge))
             val code = withTimeoutOrNull(SIGN_IN_TIMEOUT_MILLIS) { awaitCode(server, state) }
-                ?: throw GoogleAuthException("Google sign-in took too long. Try again.")
+                ?: throw GoogleAuthException(GoogleAuthException.Reason.TimedOut)
             val tokens = oauth.exchangeCode(code, verifier, redirectUri)
-            val refreshToken = tokens.refreshToken ?: throw GoogleAuthException("Google didn't give secrt lasting access. Try again.")
+            val refreshToken = tokens.refreshToken ?: throw GoogleAuthException(GoogleAuthException.Reason.NoLastingAccess)
             accessTokens[refreshToken] = tokens.accessToken to expiry(tokens.expiresInSeconds)
             BackupTargetConfig.GoogleDrive(oauth.email(tokens.accessToken), refreshToken)
         }
     }
 
     override suspend fun accessToken(account: BackupTargetConfig.GoogleDrive, stale: String?): String {
-        val refreshToken = account.refreshToken ?: throw GoogleAuthException("Connect your Google account again on this computer")
+        val refreshToken = account.refreshToken ?: throw GoogleAuthException(GoogleAuthException.Reason.ReconnectOnThisComputer)
         accessTokens[refreshToken]?.let { (token, expiresAt) ->
             if (token != stale && System.currentTimeMillis() < expiresAt) return token
         }
@@ -97,10 +98,14 @@ class DesktopGoogleSignIn(private val oauth: GoogleOAuthClient) : GoogleSignIn {
                 val error = query["error"]
                 val code = query["code"]
                 if (code == null || error != null) {
-                    it.respond(200, page("secrt didn't get access to Google Drive. You can close this tab."))
-                    throw GoogleAuthException(if (error == "access_denied") "Google Drive access wasn't granted" else "Google sign-in failed" + (error?.let { e -> ": $e" } ?: ""))
+                    it.respond(200, page(DesktopTexts.googleSignInDenied()))
+                    throw if (error == "access_denied") {
+                        GoogleAuthException(GoogleAuthException.Reason.NotGranted)
+                    } else {
+                        GoogleAuthException(GoogleAuthException.Reason.Failed, error)
+                    }
                 }
-                it.respond(200, page("secrt can now back up to your Google Drive. You can close this tab and go back to secrt."))
+                it.respond(200, page(DesktopTexts.googleSignInDone()))
                 return code
             }
         }
@@ -122,7 +127,7 @@ class DesktopGoogleSignIn(private val oauth: GoogleOAuthClient) : GoogleSignIn {
 
     private fun openInBrowser(url: String) {
         if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-            throw GoogleAuthException("secrt couldn't open a browser for Google sign-in")
+            throw GoogleAuthException(GoogleAuthException.Reason.NoBrowser)
         }
         Desktop.getDesktop().browse(URI(url))
     }

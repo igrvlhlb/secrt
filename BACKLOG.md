@@ -118,7 +118,14 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 - [ ] Entry templates / daily prompt
 
 ## Engineering
-- [ ] Localization (strings are hard-coded in English)
+- [x] Localization: English and Brazilian Portuguese, following the system (per-app language on
+      Android 13+); core errors translated through typed exceptions (docs/architecture.md, "Languages")
+- [ ] Localization leftovers: exceptions the UI doesn't know show their own (English or system)
+      message; technical details stay English ("The backup is damaged: <detail>", the LAN security
+      check's reason, Google Drive's own explanation when it refuses something, Google's error
+      codes); default device names ("Unnamed device", "Computer") are stored and sent to other
+      devices in English; file sizes use "1.5 MB" whatever the language; Android "Couldn't
+      open/write <file>" when the system gives no stream
 - [ ] UI tests (Compose) and an on-device test that the SQLCipher file holds no plaintext (the JVM
       driver already has one)
 - [ ] CI (build + `allTests`)

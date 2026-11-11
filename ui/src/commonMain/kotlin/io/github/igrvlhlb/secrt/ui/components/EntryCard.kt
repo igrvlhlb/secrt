@@ -28,6 +28,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.igrvlhlb.secrt.model.EntrySummary
 import io.github.igrvlhlb.secrt.model.Label
+import io.github.igrvlhlb.secrt.ui.resources.*
+import org.jetbrains.compose.resources.stringResource
 
 @Composable
 fun EntryCard(entry: EntrySummary, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -41,7 +43,7 @@ fun EntryCard(entry: EntrySummary, onClick: () -> Unit, modifier: Modifier = Mod
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        entry.title.ifBlank { "Untitled" },
+                        entry.title.ifBlank { stringResource(Res.string.entry_untitled) },
                         style = MaterialTheme.typography.titleMedium,
                         fontStyle = if (entry.title.isBlank()) FontStyle.Italic else FontStyle.Normal,
                         maxLines = 1,
@@ -49,10 +51,10 @@ fun EntryCard(entry: EntrySummary, onClick: () -> Unit, modifier: Modifier = Mod
                         modifier = Modifier.weight(1f),
                     )
                     if (entry.hasConflict) {
-                        Icon(Icons.Outlined.WarningAmber, "Has conflicting versions", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Outlined.WarningAmber, stringResource(Res.string.entry_has_conflict), tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                     }
                     if (entry.attachmentCount > 0) {
-                        Icon(Icons.Outlined.Attachment, "Attachments", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(Icons.Outlined.Attachment, stringResource(Res.string.entry_attachments), modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(entry.attachmentCount.toString(), style = MaterialTheme.typography.labelMedium)
                     }
                 }

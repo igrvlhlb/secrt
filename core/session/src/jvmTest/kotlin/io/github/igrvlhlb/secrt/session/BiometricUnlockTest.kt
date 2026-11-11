@@ -123,7 +123,7 @@ class BiometricUnlockTest {
         session.enableBiometricUnlock()
         session.lock()
 
-        biometrics.next = { throw BiometricException.KeyInvalidated("new fingerprint") }
+        biometrics.next = { throw BiometricException.KeyInvalidated(BiometricException.KeyInvalidated.Reason.FingerprintsChanged) }
         assertFailsWith<BiometricException.KeyInvalidated> { session.unlockWithBiometrics() }
 
         assertFalse(session.biometricUnlockEnabled.value)

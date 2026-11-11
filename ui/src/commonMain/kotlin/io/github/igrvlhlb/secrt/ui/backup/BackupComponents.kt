@@ -48,11 +48,16 @@ import io.github.igrvlhlb.secrt.backup.drive.GoogleSignIn
 import io.github.igrvlhlb.secrt.ui.AutoLock
 import io.github.igrvlhlb.secrt.ui.LocalAutoLock
 import io.github.igrvlhlb.secrt.ui.auth.PasswordField
-import io.github.igrvlhlb.secrt.ui.components.formatDateTime
 import io.github.igrvlhlb.secrt.ui.components.readableWidth
+import io.github.igrvlhlb.secrt.ui.resources.*
+import io.github.igrvlhlb.secrt.ui.text.UiText
+import io.github.igrvlhlb.secrt.ui.text.plural
+import io.github.igrvlhlb.secrt.ui.text.string
+import io.github.igrvlhlb.secrt.ui.text.text
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import org.jetbrains.compose.resources.stringResource
 
 /**
  * A screen over the current one. The backup screens are dialogs rather than navigation routes so
@@ -65,7 +70,7 @@ internal fun FullScreenDialog(title: String, onClose: () -> Unit, content: @Comp
             topBar = {
                 TopAppBar(
                     title = { Text(title) },
-                    navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                    navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(Res.string.action_back)) } },
                 )
             },
         ) { padding ->
@@ -90,17 +95,16 @@ internal data class ServerFields(val url: String = "", val username: String = ""
  * (connect, test…).
  */
 @Composable
-internal fun ServerForm(fields: ServerFields, onChange: (ServerFields) -> Unit, enabled: Boolean, error: String?, actions: @Composable () -> Unit) {
+internal fun ServerForm(fields: ServerFields, onChange: (ServerFields) -> Unit, enabled: Boolean, error: UiText?, actions: @Composable () -> Unit) {
     Text(
-        "A WebDAV folder on your own server: Nextcloud, a NAS, or any WebDAV host. For Nextcloud, the " +
-            "server address is enough; use an app password (Settings › Security).",
+        stringResource(Res.string.backup_server_intro),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     OutlinedTextField(
         value = fields.url,
         onValueChange = { onChange(fields.copy(url = it)) },
-        label = { Text("Server address") },
+        label = { Text(stringResource(Res.string.backup_server_address)) },
         placeholder = { Text("https://cloud.example.com") },
         singleLine = true,
         enabled = enabled,
@@ -110,20 +114,17 @@ internal fun ServerForm(fields: ServerFields, onChange: (ServerFields) -> Unit, 
     OutlinedTextField(
         value = fields.username,
         onValueChange = { onChange(fields.copy(username = it)) },
-        label = { Text("Username") },
+        label = { Text(stringResource(Res.string.backup_username)) },
         singleLine = true,
         enabled = enabled,
         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, imeAction = ImeAction.Next),
         modifier = Modifier.fillMaxWidth(),
     )
-    PasswordField(fields.password, { onChange(fields.copy(password = it)) }, "Password or app password", imeAction = ImeAction.Done)
+    PasswordField(fields.password, { onChange(fields.copy(password = it)) }, stringResource(Res.string.backup_server_password), imeAction = ImeAction.Done)
     if (fields.insecure) {
-        Notice(
-            "This address doesn't use https: the server password travels unprotected. The diary itself " +
-                "stays encrypted, but only use http on a network you trust.",
-        )
+        Notice(stringResource(Res.string.backup_insecure_address))
     }
-    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    error?.let { Text(it.string(), color = MaterialTheme.colorScheme.error) }
     actions()
 }
 
@@ -138,7 +139,7 @@ internal fun Notice(text: String) {
 internal fun ProgressCard(progress: BackupProgress) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(progress.label())
+            Text(progress.label().string())
             if (progress.total > 0) {
                 LinearProgressIndicator(progress = { progress.done.toFloat() / progress.total }, modifier = Modifier.fillMaxWidth())
             } else {
@@ -164,29 +165,30 @@ internal fun SecondaryButton(text: String, enabled: Boolean, onClick: () -> Unit
 @Composable
 internal fun rememberServerFields(initial: ServerFields = ServerFields()) = remember { mutableStateOf(initial) }
 
-internal fun BackupProgress.label(): String {
-    val count = if (total > 0) " (${done + 1} of $total)" else ""
-    return when (stage) {
-        BackupProgress.Stage.Checking -> "Checking the backup…"
-        BackupProgress.Stage.Downloading -> "Downloading changes$count…"
-        BackupProgress.Stage.DownloadingAttachments -> "Downloading attachments$count…"
-        BackupProgress.Stage.UploadingAttachments -> "Uploading attachments$count…"
-        BackupProgress.Stage.Uploading -> "Uploading changes$count…"
+internal fun BackupProgress.label(): UiText {
+    val (plain, counted) = when (stage) {
+        BackupProgress.Stage.Checking -> return text(Res.string.backup_checking)
+        BackupProgress.Stage.Downloading -> Res.string.backup_downloading to Res.string.backup_downloading_count
+        BackupProgress.Stage.DownloadingAttachments -> Res.string.backup_downloading_attachments to Res.string.backup_downloading_attachments_count
+        BackupProgress.Stage.UploadingAttachments -> Res.string.backup_uploading_attachments to Res.string.backup_uploading_attachments_count
+        BackupProgress.Stage.Uploading -> Res.string.backup_uploading to Res.string.backup_uploading_count
     }
+    return if (total > 0) text(counted, done + 1, total) else text(plain)
 }
 
-internal fun BackupResult.summary(): String {
+internal fun BackupResult.summary(): UiText {
     val parts = buildList {
-        if (downloaded > 0) add("${changes(downloaded)} downloaded")
-        if (uploaded > 0) add("${changes(uploaded)} uploaded")
+        if (downloaded > 0) add(plural(Res.plurals.backup_downloaded, downloaded))
+        if (uploaded > 0) add(plural(Res.plurals.backup_uploaded, uploaded))
     }
-    val missing = if (missingAttachments > 0) " ${changes(missingAttachments, "attachment")} missing on the server." else ""
-    return (if (parts.isEmpty()) "Everything was already up to date." else parts.joinToString(", ").replaceFirstChar { it.uppercase() } + ".") + missing
+    val done = when (parts.size) {
+        0 -> text(Res.string.backup_up_to_date)
+        1 -> text(Res.string.backup_summary_one, parts[0])
+        else -> text(Res.string.backup_summary_two, parts[0], parts[1])
+    }
+    if (missingAttachments == 0) return done
+    return UiText.Joined(listOf(done, plural(Res.plurals.backup_attachments_missing, missingAttachments)))
 }
-
-private fun changes(n: Int, noun: String = "change") = if (n == 1) "1 $noun" else "$n ${noun}s"
-
-internal fun formatTime(epochMillis: Long): String = formatDateTime(epochMillis)
 
 @Composable
 internal fun LabeledValue(label: String, value: String) {

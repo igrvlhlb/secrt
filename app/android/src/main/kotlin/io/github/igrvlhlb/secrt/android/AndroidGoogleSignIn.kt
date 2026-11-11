@@ -68,29 +68,27 @@ class AndroidGoogleSignIn(private val context: Context) : GoogleSignIn {
             val first = client().authorize(request).await()
             if (first.hasResolution()) resolve(first) else first
         } catch (e: ApiException) {
-            throw GoogleAuthException(
-                when (e.statusCode) {
-                    CommonStatusCodes.DEVELOPER_ERROR -> "This build of secrt isn't registered with Google (developer error)"
-                    CommonStatusCodes.NETWORK_ERROR -> "Couldn't reach Google"
-                    else -> "Google sign-in failed (${CommonStatusCodes.getStatusCodeString(e.statusCode)})"
-                },
-            )
+            throw when (e.statusCode) {
+                CommonStatusCodes.DEVELOPER_ERROR -> GoogleAuthException(GoogleAuthException.Reason.NotRegistered)
+                CommonStatusCodes.NETWORK_ERROR -> GoogleAuthException(GoogleAuthException.Reason.Unreachable)
+                else -> GoogleAuthException(GoogleAuthException.Reason.Failed, CommonStatusCodes.getStatusCodeString(e.statusCode))
+            }
         }
         val granted = result.grantedScopes.map { it.toString() }
-        if (GoogleScopes.DRIVE_APPDATA !in granted) throw GoogleAuthException("Google Drive access wasn't granted")
-        return result.accessToken ?: throw GoogleAuthException("Google didn't give secrt access to Drive")
+        if (GoogleScopes.DRIVE_APPDATA !in granted) throw GoogleAuthException(GoogleAuthException.Reason.NotGranted)
+        return result.accessToken ?: throw GoogleAuthException(GoogleAuthException.Reason.NoDriveAccess)
     }
 
     /** Shows Google's account picker and consent screen, and waits for the user. */
     private suspend fun resolve(result: AuthorizationResult): AuthorizationResult {
-        val launcher = launcher ?: throw GoogleAuthException("Open secrt to sign in to Google")
-        val intentSender = result.pendingIntent?.intentSender ?: throw GoogleAuthException("Google sign-in failed")
+        val launcher = launcher ?: throw GoogleAuthException(GoogleAuthException.Reason.AppNotOpen)
+        val intentSender = result.pendingIntent?.intentSender ?: throw GoogleAuthException(GoogleAuthException.Reason.Failed)
         val answer = CompletableDeferred<ActivityResult>()
         pending = answer
         try {
             withContext(Dispatchers.Main) { launcher.launch(IntentSenderRequest.Builder(intentSender).build()) }
             val activityResult = answer.await()
-            if (activityResult.resultCode != Activity.RESULT_OK) throw GoogleAuthException("Google Drive access wasn't granted")
+            if (activityResult.resultCode != Activity.RESULT_OK) throw GoogleAuthException(GoogleAuthException.Reason.NotGranted)
             return client().getAuthorizationResultFromIntent(activityResult.data)
         } finally {
             pending = null

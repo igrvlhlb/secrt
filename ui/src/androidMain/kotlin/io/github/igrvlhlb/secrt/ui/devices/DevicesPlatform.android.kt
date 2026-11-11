@@ -42,6 +42,10 @@ import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import io.github.igrvlhlb.secrt.lan.PairingInvite
 import io.github.igrvlhlb.secrt.ui.LocalAutoLock
+import io.github.igrvlhlb.secrt.ui.resources.Res
+import io.github.igrvlhlb.secrt.ui.resources.camera_allow
+import io.github.igrvlhlb.secrt.ui.resources.camera_rationale
+import org.jetbrains.compose.resources.stringResource
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -81,8 +85,8 @@ internal actual fun QrScanner(onScanned: (String) -> Unit, modifier: Modifier) {
         CameraPreview(onScanned, modifier)
     } else if (asked) {
         Column(modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("secrt needs the camera to scan the pairing code on your other device. It's only used while this screen is open.")
-            Button(onClick = ::requestPermission) { Text("Allow camera") }
+            Text(stringResource(Res.string.camera_rationale))
+            Button(onClick = ::requestPermission) { Text(stringResource(Res.string.camera_allow)) }
         }
     }
 }

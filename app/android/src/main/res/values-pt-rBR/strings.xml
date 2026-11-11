@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="biometric_enable_title">Ativar o desbloqueio por digital</string>
+    <string name="biometric_enable_subtitle">Confirme com sua digital</string>
+    <string name="biometric_enable_negative">Cancelar</string>
+    <string name="biometric_unlock_title">Desbloqueie seu diário</string>
+    <string name="biometric_unlock_subtitle">Use sua digital</string>
+    <string name="biometric_unlock_negative">Usar senha</string>
+</resources>

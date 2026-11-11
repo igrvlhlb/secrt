@@ -38,15 +38,60 @@ interface BackupTarget : AutoCloseable {
     override fun close() {}
 }
 
-/** Something went wrong talking to the backup target. Messages are meant for the user. */
+/**
+ * Something went wrong talking to the backup target. Messages are in English, for logs and tests;
+ * the UI shows its own (translated) text for each subclass and its fields.
+ */
 open class BackupException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 class BackupAuthException : BackupException("The server refused the username or password")
 
+/** The server couldn't be reached; [detail] is the system's reason, if it gave one. */
 class BackupNetworkException(cause: Throwable) :
-    BackupException("Couldn't reach the server" + (cause.message?.let { ": $it" } ?: ""), cause)
+    BackupException("Couldn't reach the server" + (cause.message?.let { ": $it" } ?: ""), cause) {
+    val detail: String? = cause.message
+}
 
-class BackupServerException(message: String) : BackupException(message)
+/** The server answered, but not as hoped: see [problem]. */
+class BackupServerException(
+    val problem: Problem,
+    /** The file or folder concerned, for every problem but [Problem.OutOfSpace]. */
+    val path: String? = null,
+    /** What was being done, for [Problem.NotAllowed] and [Problem.Failed]. */
+    val action: Action? = null,
+    /** The HTTP status, for [Problem.Failed]. */
+    val status: Int? = null,
+) : BackupException(englishMessage(problem, path, action, status)) {
+
+    enum class Problem { FileTooLarge, NoWebDavFolder, NotAllowed, OutOfSpace, Failed }
+
+    enum class Action(internal val english: String) {
+        List("list"),
+        Download("download"),
+        Upload("upload"),
+        Delete("delete"),
+        CreateFolder("create the folder"),
+    }
+
+    private companion object {
+        fun englishMessage(problem: Problem, path: String?, action: Action?, status: Int?): String {
+            val what = listOfNotNull(action?.english, path).joinToString(" ")
+            return when (problem) {
+                Problem.FileTooLarge -> "$path is larger than any backup file"
+                Problem.NoWebDavFolder -> "No WebDAV folder answers at $path"
+                Problem.NotAllowed -> "The server doesn't allow this account to $what"
+                Problem.OutOfSpace -> "The server is out of space"
+                Problem.Failed -> "The server couldn't $what (HTTP $status)"
+            }
+        }
+    }
+}
+
+/** What the user typed isn't a server address. */
+class InvalidServerAddressException : BackupException("That isn't a valid server address")
+
+/** Another device changed the backup while this one was working on it. */
+class BackupChangedException : BackupException("The backup changed meanwhile. Try again.")
 
 /**
  * The user turned down taking on the backup's newer password (or recovery key), so nothing was
@@ -56,4 +101,4 @@ class KeySlotsChangeDeclinedException :
     BackupException("Nothing was synced: this device keeps its current password.")
 
 /** The target has no backup of the diary that was asked for. */
-class NoBackupFoundException(message: String = "No secrt backup was found there") : BackupException(message)
+class NoBackupFoundException : BackupException("No secrt backup was found there")

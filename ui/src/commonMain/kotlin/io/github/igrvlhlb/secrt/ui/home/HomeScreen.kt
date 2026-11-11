@@ -18,8 +18,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,12 +30,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.igrvlhlb.secrt.session.AppSession
 import io.github.igrvlhlb.secrt.storage.DiaryStore
 import io.github.igrvlhlb.secrt.ui.components.readableWidth
+import io.github.igrvlhlb.secrt.ui.resources.*
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.stringResource
 
-enum class HomeTab(val title: String, val icon: ImageVector) {
-    Journal("Journal", Icons.Outlined.Book),
-    Folders("Folders", Icons.Outlined.Folder),
-    Labels("Labels", Icons.AutoMirrored.Outlined.Label),
-    Settings("Settings", Icons.Outlined.Settings),
+enum class HomeTab(val title: StringResource, val icon: ImageVector) {
+    Journal(Res.string.tab_journal, Icons.Outlined.Book),
+    Folders(Res.string.tab_folders, Icons.Outlined.Folder),
+    Labels(Res.string.tab_labels, Icons.AutoMirrored.Outlined.Label),
+    Settings(Res.string.tab_settings, Icons.Outlined.Settings),
 }
 
 /** Snackbar of the home screen, so any tab can report errors. */
@@ -61,7 +64,7 @@ fun HomeScreen(
                             selected = tab == it,
                             onClick = { tab = it },
                             icon = { Icon(it.icon, contentDescription = null) },
-                            label = { Text(it.title) },
+                            label = { Text(stringResource(it.title)) },
                         )
                     }
                 }
@@ -95,5 +98,5 @@ fun TabScaffold(
 
 @Composable
 fun NewEntryFab(onClick: () -> Unit) {
-    FloatingActionButton(onClick = onClick) { Icon(Icons.Outlined.Book, contentDescription = "New entry") }
+    FloatingActionButton(onClick = onClick) { Icon(Icons.Outlined.Book, contentDescription = stringResource(Res.string.new_entry)) }
 }
