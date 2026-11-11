@@ -382,7 +382,7 @@ class LanSyncTest {
 
         val error = assertFailsWith<LanException.Declined> { phone.lan.pair(host.newCode(), ask = { false }) }
         assertEquals("Nothing was sent to Computer.", error.message)
-        assertEquals(LanHost.Event.Failed("Phone declined to send its diary."), failure.await())
+        assertEquals("Phone declined to send its diary.", (failure.await() as LanHost.Event.Failed).message)
         assertNull(computer.lan.pendingJoin.value)
         assertEquals(SessionState.NoVault, computer.session.state.value)
         assertEquals(emptyList(), phone.store.peers.all())
@@ -399,7 +399,7 @@ class LanSyncTest {
 
         val error = assertFailsWith<LanException.DeclinedThere> { stranger.lan.join(host.newCode()) }
         assertEquals("Computer declined to send its diary.", error.message)
-        assertEquals(LanHost.Event.Failed("Nothing was sent to Stranger."), failure.await())
+        assertEquals("Nothing was sent to Stranger.", (failure.await() as LanHost.Event.Failed).message)
         assertNull(stranger.lan.pendingJoin.value)
         assertEquals(SessionState.NoVault, stranger.session.state.value)
         assertEquals(emptyList(), computer.store.peers.all())
@@ -587,7 +587,7 @@ class LanSyncTest {
 
         val error = assertFailsWith<LanException.Declined> { phone.lan.sync(phone.store.peers.all().single(), ask = { false }) }
         assertEquals("Not synced with Computer: this device keeps its password.", error.message)
-        assertEquals(LanHost.Event.Failed("Phone declined: its password would have changed."), failure.await())
+        assertEquals("Phone declined: its password would have changed.", (failure.await() as LanHost.Event.Failed).message)
         // Not one change went either way, and the phone keeps its password.
         assertTrue("Computer, later" !in phone.store.titles())
         assertTrue("Phone, later" !in computer.store.titles())
@@ -608,7 +608,7 @@ class LanSyncTest {
 
         val error = assertFailsWith<LanException.DeclinedThere> { phone.lan.sync(phone.store.peers.all().single()) }
         assertEquals("Computer declined: its password would have changed.", error.message)
-        assertEquals(LanHost.Event.Failed("Not synced with Phone: this device keeps its password."), failure.await())
+        assertEquals("Not synced with Phone: this device keeps its password.", (failure.await() as LanHost.Event.Failed).message)
         assertTrue("Computer, later" !in phone.store.titles())
         assertTrue("Phone, later" !in computer.store.titles())
         computer.session.lock()
@@ -634,7 +634,7 @@ class LanSyncTest {
         val peersBefore = computer.store.peers.all()
         val refused = scope.async { host.events.first { it is LanHost.Event.Failed } }
         assertFailsWith<LanException.Protocol> { phone.lan.pair(host.newCode()) }
-        assertEquals(LanHost.Event.Failed("Phone runs an older version of secrt. Update secrt on it to sync with this device."), refused.await())
+        assertEquals("Phone runs an older version of secrt. Update secrt on it to sync with this device.", (refused.await() as LanHost.Event.Failed).message)
         assertEquals(peersBefore, computer.store.peers.all())
 
         // A computer being set up by a version that doesn't read "declined" reasons still hears a refusal.

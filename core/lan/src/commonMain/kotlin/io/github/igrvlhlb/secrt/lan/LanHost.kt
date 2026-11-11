@@ -33,7 +33,16 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
 
         data class Listening(val addresses: List<String>, val port: Int) : Status
 
-        data class Failed(val message: String) : Status
+        data class Failed(val problem: Problem) : Status {
+            enum class Problem { NoNetwork, NoPort }
+
+            /** In English, for logs and tests; the UI has its own text for [problem]. */
+            val message: String
+                get() = when (problem) {
+                    Problem.NoNetwork -> "This device isn't connected to a network."
+                    Problem.NoPort -> "Couldn't open a network port for syncing."
+                }
+        }
     }
 
     /** A pairing code on screen. */
@@ -53,7 +62,30 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
         /** The connected device asks its user something (e.g. whether to send its diary here) before going on. */
         data class WaitingForAnswer(val peerName: String) : Event
 
-        data class Failed(val message: String) : Event
+        /**
+         * A connected device's pairing or sync failed, for [problem]. [peerName] is `null` if it
+         * failed before the device said its name; [Problem.Error] carries the [cause].
+         */
+        data class Failed(val problem: Problem, val peerName: String?, val cause: Throwable? = null) : Event {
+            enum class Problem {
+                /** A computer being set up was scanned by a device without a diary either. */
+                NoDiaryEither,
+                DifferentDiary,
+                Outdated,
+                ConnectionLost,
+                Error,
+            }
+
+            /** In English, for logs and tests; the UI has its own text for [problem]. */
+            val message: String
+                get() = when (problem) {
+                    Problem.NoDiaryEither -> "$peerName has no diary either: there's nothing to set this computer up from."
+                    Problem.DifferentDiary -> "$peerName holds a different diary, so it can't sync with this one."
+                    Problem.Outdated -> "$peerName runs an older version of secrt. Update secrt on it to sync with this device."
+                    Problem.ConnectionLost -> "The connection to ${peerName ?: "A device"} was lost."
+                    Problem.Error -> cause?.message ?: "Sync failed"
+                }
+        }
     }
 
     private val _status = MutableStateFlow<Status>(Status.Starting)
@@ -99,7 +131,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
             server = bind(selector) ?: return@withContext
             val port = (server.localAddress as InetSocketAddress).port
             val addresses = lan.localAddresses()
-            _status.value = if (addresses.isEmpty()) Status.Failed("This device isn't connected to a network.") else Status.Listening(addresses, port)
+            _status.value = if (addresses.isEmpty()) Status.Failed(Status.Failed.Problem.NoNetwork) else Status.Listening(addresses, port)
             while (true) {
                 val socket = server.accept()
                 val received = serve(SocketConnection(socket), crypto)
@@ -141,13 +173,13 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
                 // Taken (another app, or a second window): any free port works, since codes carry it.
             }
         }
-        _status.value = Status.Failed("Couldn't open a network port for syncing.")
+        _status.value = Status.Failed(Status.Failed.Problem.NoPort)
         return null
     }
 
     /** @return whether a diary was received (joining), which ends listening. */
     private suspend fun serve(connection: Connection, crypto: Crypto): Boolean {
-        var peerName = "A device"
+        var peerName: String? = null
         // Before authentication, failures are whoever knocked (a port scan, a stale phone): not worth telling the user.
         var authenticated = false
         try {
@@ -168,7 +200,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
             if (joining) {
                 if (hello.vaultId == null) {
                     messages.send(Failure(Failure.Reason.NoDiary))
-                    _events.tryEmit(Event.Failed("$peerName has no diary either: there's nothing to set this computer up from."))
+                    _events.tryEmit(Event.Failed(Event.Failed.Problem.NoDiaryEither, peerName))
                     return false
                 }
                 messages.send(Hello(lan.ownName(), deviceId = null, vaultId = null, lan.protocolVersion))
@@ -198,7 +230,7 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
                 messages.send(Hello(lan.ownName(), store.deviceId, vaultId, lan.protocolVersion))
                 val answer = lan.decide(LanQuestion.SendDiary(peerName, peerAsked = true), ::ask)
                 if (answer != LanSync.Answer.Yes) {
-                    lan.refuse(messages, answer, hello.protocol, Failure.Reason.SendDeclined, "Nothing was sent to $peerName.")
+                    lan.refuse(messages, answer, hello.protocol, Failure.Reason.SendDeclined, peerName)
                 }
                 val sent = store.versionVector()
                 lan.sendDiary(messages)
@@ -211,13 +243,13 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
             }
             if (hello.vaultId != vaultId) {
                 messages.send(Failure(Failure.Reason.DifferentDiary))
-                _events.tryEmit(Event.Failed("$peerName holds a different diary, so it can't sync with this one."))
+                _events.tryEmit(Event.Failed(Event.Failed.Problem.DifferentDiary, peerName))
                 return false
             }
             if (hello.protocol < LanSync.PROTOCOL_KEY_SLOTS) {
                 // It wouldn't agree on key slots (see LanSync.requireKeySlots); it reads this as a refusal.
                 messages.send(Failure(Failure.Reason.Protocol))
-                _events.tryEmit(Event.Failed("$peerName runs an older version of secrt. Update secrt on it to sync with this device."))
+                _events.tryEmit(Event.Failed(Event.Failed.Problem.Outdated, peerName))
                 return false
             }
             messages.send(Hello(lan.ownName(), store.deviceId, vaultId, lan.protocolVersion))
@@ -231,13 +263,13 @@ class LanHost internal constructor(private val lan: LanSync, val joining: Boolea
         } catch (e: CancellationException) {
             throw e
         } catch (e: LanException) {
-            if (authenticated) _events.tryEmit(Event.Failed(e.message ?: "Sync failed"))
+            if (authenticated) _events.tryEmit(Event.Failed(Event.Failed.Problem.Error, peerName, e))
         } catch (e: ConnectionClosedException) {
-            if (authenticated) _events.tryEmit(Event.Failed("The connection to $peerName was lost."))
+            if (authenticated) _events.tryEmit(Event.Failed(Event.Failed.Problem.ConnectionLost, peerName))
         } catch (e: StoreClosedException) {
             // Locked meanwhile; the screen is going away.
         } catch (e: Exception) {
-            _events.tryEmit(Event.Failed(e.message ?: "Sync failed"))
+            _events.tryEmit(Event.Failed(Event.Failed.Problem.Error, peerName, e))
         } finally {
             connection.close()
         }

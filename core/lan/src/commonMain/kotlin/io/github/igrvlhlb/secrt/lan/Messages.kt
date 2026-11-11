@@ -113,7 +113,7 @@ internal sealed interface Incoming {
 internal class MessageChannel(val channel: SecureChannel) {
 
     /** How failures from the other side name it; set once its hello arrived. */
-    var peerName: String = "The other device"
+    var peerName: String? = null
 
     suspend fun send(message: LanMessage) =
         channel.send(byteArrayOf(TYPE_MESSAGE) + json.encodeToString(LanMessage.serializer(), message).encodeToByteArray())
@@ -174,7 +174,7 @@ internal class MessageChannel(val channel: SecureChannel) {
 /** Blob ids are 32-byte keyed hashes in hex; anything else could be a path, so it never reaches storage. */
 internal fun isValidBlobId(id: String): Boolean = id.length == 64 && id.all { it in '0'..'9' || it in 'a'..'f' }
 
-internal fun Failure.toException(peerName: String = "The other device"): LanException = when (reason) {
+internal fun Failure.toException(peerName: String? = null): LanException = when (reason) {
     Failure.Reason.WrongCode -> LanException.WrongCode()
     Failure.Reason.UnknownDevice -> LanException.UnknownDevice(peerName)
     Failure.Reason.DifferentDiary -> LanException.DifferentDiary()
@@ -182,7 +182,7 @@ internal fun Failure.toException(peerName: String = "The other device"): LanExce
     Failure.Reason.Locked -> LanException.Locked()
     Failure.Reason.Busy -> LanException.Busy()
     Failure.Reason.Protocol -> LanException.Protocol("rejected by the other device")
-    Failure.Reason.SendDeclined -> LanException.DeclinedThere("$peerName declined to send its diary.")
-    Failure.Reason.NoAnswer -> LanException.DeclinedThere("Nobody answered on $peerName in time. Try again.")
-    Failure.Reason.KeySlotsDeclined -> LanException.DeclinedThere("$peerName declined: its password would have changed.")
+    Failure.Reason.SendDeclined -> LanException.DeclinedThere(LanException.DeclinedThere.Reason.SendDeclined, peerName)
+    Failure.Reason.NoAnswer -> LanException.DeclinedThere(LanException.DeclinedThere.Reason.NoAnswer, peerName)
+    Failure.Reason.KeySlotsDeclined -> LanException.DeclinedThere(LanException.DeclinedThere.Reason.KeepsPassword, peerName)
 }

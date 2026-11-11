@@ -17,9 +17,10 @@ open class ArchiveException(message: String, cause: Throwable? = null) : Excepti
 
 class NotAnArchiveException : ArchiveException("This isn't a secrt backup file")
 
-class CorruptArchiveException(message: String, cause: Throwable? = null) : ArchiveException("The backup is damaged: $message", cause)
+/** [detail] says what is wrong, in technical English. */
+class CorruptArchiveException(val detail: String, cause: Throwable? = null) : ArchiveException("The backup is damaged: $detail", cause)
 
-class UnsupportedArchiveException(format: Int) : ArchiveException("This backup was made by a newer version of secrt (format $format)")
+class UnsupportedArchiveException(val format: Int) : ArchiveException("This backup was made by a newer version of secrt (format $format)")
 
 class DifferentVaultException : ArchiveException("This backup belongs to a different diary")
 

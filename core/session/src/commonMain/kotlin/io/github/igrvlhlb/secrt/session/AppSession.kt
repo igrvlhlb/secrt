@@ -166,7 +166,7 @@ class AppSession(
                     vault().unlockWithDataKey(dataKey)
                 } catch (e: InvalidCredentialsException) {
                     disableBiometricUnlock()
-                    throw BiometricException.KeyInvalidated("The saved fingerprint key doesn't belong to this diary")
+                    throw BiometricException.KeyInvalidated(BiometricException.KeyInvalidated.Reason.OtherDiary)
                 }
                 open(newKeys, viaRecoveryKey = false)
             }

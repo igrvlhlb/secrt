@@ -4,8 +4,10 @@ import io.github.igrvlhlb.secrt.backup.BackupAuthException
 import io.github.igrvlhlb.secrt.backup.BackupException
 import io.github.igrvlhlb.secrt.backup.BackupNetworkException
 import io.github.igrvlhlb.secrt.backup.BackupServerException
+import io.github.igrvlhlb.secrt.backup.BackupServerException.Action
 import io.github.igrvlhlb.secrt.backup.BackupTarget
 import io.github.igrvlhlb.secrt.backup.BackupTargetConfig
+import io.github.igrvlhlb.secrt.backup.InvalidServerAddressException
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.plugins.HttpTimeout
@@ -62,7 +64,7 @@ class WebDavTarget(
                 childNames(Url(url).encodedPath.decodeURLPart(), parseMultistatus(response.bodyAsText()))
             }
             404 -> emptyList()
-            else -> throw failure(response, "list $directory")
+            else -> throw failure(response, Action.List, directory)
         }
     }
 
@@ -71,11 +73,11 @@ class WebDavTarget(
         return when (response.status) {
             HttpStatusCode.OK -> {
                 // The server isn't trusted: don't let it make us allocate without bound.
-                if ((response.contentLength() ?: 0) > MAX_FILE_BYTES) throw BackupServerException("$path is larger than any backup file")
+                if ((response.contentLength() ?: 0) > MAX_FILE_BYTES) throw BackupServerException(BackupServerException.Problem.FileTooLarge, path)
                 response.bodyAsBytes()
             }
             HttpStatusCode.NotFound, HttpStatusCode.Gone -> null
-            else -> throw failure(response, "download $path")
+            else -> throw failure(response, Action.Download, path)
         }
     }
 
@@ -84,12 +86,12 @@ class WebDavTarget(
         val parent = path.substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "$it/" }
         if (parent !in knownDirectories) createDirectories(parent)
         val response = send(HttpMethod.Put, url(path)) { setBody(ByteArrayContent(bytes, ContentType.Application.OctetStream)) }
-        if (!response.status.isSuccess()) throw failure(response, "upload $path")
+        if (!response.status.isSuccess()) throw failure(response, Action.Upload, path)
     }
 
     override suspend fun delete(path: String) {
         val response = send(HttpMethod.Delete, url(path))
-        if (!response.status.isSuccess() && response.status != HttpStatusCode.NotFound) throw failure(response, "delete $path")
+        if (!response.status.isSuccess() && response.status != HttpStatusCode.NotFound) throw failure(response, Action.Delete, path)
     }
 
     override fun close() = client.close()
@@ -103,7 +105,7 @@ class WebDavTarget(
             val response = send(MKCOL, url(dir))
             when {
                 response.status.isSuccess() || response.status == HttpStatusCode.MethodNotAllowed -> knownDirectories += dir
-                else -> throw failure(response, "create the folder $dir")
+                else -> throw failure(response, Action.CreateFolder, dir)
             }
         }
     }
@@ -135,7 +137,7 @@ class WebDavTarget(
             val folder = try {
                 normalizeFolderUrl(url)
             } catch (e: IllegalArgumentException) {
-                throw BackupException("That isn't a valid server address")
+                throw InvalidServerAddressException()
             }
             val candidates = listOf(folder) +
                 if ("/remote.php/" in folder) emptyList() else listOf("${folder}remote.php/dav/files/${username.encodeURLPathPart()}/")
@@ -156,7 +158,7 @@ class WebDavTarget(
             } finally {
                 client.close()
             }
-            found ?: throw BackupServerException("No WebDAV folder answers at $folder")
+            found ?: throw BackupServerException(BackupServerException.Problem.NoWebDavFolder, folder)
             val config = BackupTargetConfig.WebDav(found, username, password)
             // Writing proves the account may create files there (some shares are read-only).
             WebDavTarget(config, engine).use { target ->
@@ -271,11 +273,11 @@ private suspend fun HttpClient.call(
     throw BackupNetworkException(e)
 }
 
-private suspend fun failure(response: HttpResponse, action: String): BackupException = when (response.status.value) {
+private fun failure(response: HttpResponse, action: Action, path: String): BackupException = when (val status = response.status.value) {
     401 -> BackupAuthException()
-    403 -> BackupServerException("The server doesn't allow this account to $action")
-    507 -> BackupServerException("The server is out of space")
-    else -> BackupServerException("The server couldn't $action (HTTP ${response.status.value})")
+    403 -> BackupServerException(BackupServerException.Problem.NotAllowed, path, action)
+    507 -> BackupServerException(BackupServerException.Problem.OutOfSpace)
+    else -> BackupServerException(BackupServerException.Problem.Failed, path, action, status)
 }
 
 /** The HTTP engine of the platform (OkHttp on Android and the desktop). */

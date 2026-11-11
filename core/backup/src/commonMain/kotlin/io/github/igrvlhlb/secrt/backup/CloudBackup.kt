@@ -222,7 +222,7 @@ class CloudBackup(
             checkManifest(target, dir, diary.keys.vaultId, createIfMissing = false)
             // Asked about before the session lock was taken: another device may have pushed since.
             val newer = (sealedKeySlots() as? KeySlotsComparison.NewerThere)?.change
-            if (newer != null && newer != accepted) throw BackupException("The backup changed meanwhile. Try again.")
+            if (newer != null && newer != accepted) throw BackupChangedException()
             val fetched = fetch(target, dir, diary.crypto, diary.keys, diary.blobs, store.loadState(target), onProgress)
             val added = store.applyRemote(fetched.revisions)
             var state = fetched.state

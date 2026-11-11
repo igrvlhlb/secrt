@@ -183,7 +183,7 @@ class LanSync(
                     // It waits for the answer, and hears if it's no (a version from before the
                     // question just waits as it would for the archive).
                     val answer = decide(LanQuestion.SendDiary(name, peerAsked = false), ask)
-                    if (answer != Answer.Yes) refuse(messages, answer, hello.protocol, Failure.Reason.SendDeclined, "Nothing was sent to $name.")
+                    if (answer != Answer.Yes) refuse(messages, answer, hello.protocol, Failure.Reason.SendDeclined, name)
                     progress(LanProgress.SendingDiary)
                     val sent = store.versionVector()
                     sendDiary(messages)
@@ -288,11 +288,12 @@ class LanSync(
             } catch (e: LanException.UnknownDevice) {
                 throw LanException.UnknownDevice(peer.name)
             }
-            messages.peerName = hello.deviceName.clean()
+            val name = hello.deviceName.clean()
+            messages.peerName = name
             if (hello.vaultId != vaultId) throw LanException.DifferentDiary()
             requireKeySlots(messages, hello)
             progress(LanProgress.Syncing)
-            val turn = KeySlotsTurn(this@LanSync, messages.peerName, ask) { progress(LanProgress.WaitingForAnswer) }
+            val turn = KeySlotsTurn(this@LanSync, name, ask) { progress(LanProgress.WaitingForAnswer) }
             val stats = SyncExchange.run(messages, store, initiator = true, turn)
             val addresses = (listOf(address) + peer.addresses).distinct()
             store.peers.recordSync(peer.identityKey, hello.deviceName.clean(), hello.deviceId, addresses, store.versionVector(), now())
@@ -479,7 +480,7 @@ class LanSync(
      * Tells the other side that nothing follows because of [answer] ([declined] if the user said
      * no), in terms its [protocol] understands, then throws for this side.
      */
-    internal suspend fun refuse(messages: MessageChannel, answer: Answer, protocol: Int, declined: Failure.Reason, declinedHere: String): Nothing {
+    internal suspend fun refuse(messages: MessageChannel, answer: Answer, protocol: Int, declined: Failure.Reason, peerName: String): Nothing {
         val reason = when (answer) {
             Answer.Yes -> error("Nothing to refuse")
             Answer.No -> declined
@@ -489,7 +490,10 @@ class LanSync(
         // Versions from before the question can't read its reasons; this is the closest they know.
         val understood = reason == Failure.Reason.Locked || protocol >= PROTOCOL_ASKS
         messages.send(Failure(if (understood) reason else Failure.Reason.Protocol))
-        throw if (answer == Answer.Locked) LanException.Locked() else LanException.Declined(declinedHere)
+        throw if (answer == Answer.Locked) LanException.Locked() else LanException.Declined(
+            if (declined == Failure.Reason.KeySlotsDeclined) LanException.Declined.Reason.KeepsPassword else LanException.Declined.Reason.NothingSent,
+            peerName,
+        )
     }
 
     private suspend fun <T> client(block: suspend () -> T): T = clientLock.withLock {

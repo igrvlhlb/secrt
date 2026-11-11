@@ -80,19 +80,18 @@ internal object SyncExchange {
         // its own), so nothing it sent is left unread if this ends here.
         val answer = adopting?.let { lan.decide(LanQuestion.AdoptKeySlots(keySlots.peerName, it), keySlots.ask) }
         if (comparison == KeySlotsComparison.NewerHere) keySlots.onWaiting()
-        val declinedHere = "Not synced with ${keySlots.peerName}: this device keeps its password."
 
         val ownVector = store.versionVector()
         val theirVector = if (initiator) {
             if (answer != null && answer != LanSync.Answer.Yes) {
-                lan.refuse(channel, answer, LanSync.PROTOCOL_KEY_SLOTS, Failure.Reason.KeySlotsDeclined, declinedHere)
+                lan.refuse(channel, answer, LanSync.PROTOCOL_KEY_SLOTS, Failure.Reason.KeySlotsDeclined, keySlots.peerName)
             }
             channel.send(Vector(ownVector))
             channel.expect<Vector>().versionVector
         } else {
             channel.expect<Vector>().versionVector.also {
                 if (answer != null && answer != LanSync.Answer.Yes) {
-                    lan.refuse(channel, answer, LanSync.PROTOCOL_KEY_SLOTS, Failure.Reason.KeySlotsDeclined, declinedHere)
+                    lan.refuse(channel, answer, LanSync.PROTOCOL_KEY_SLOTS, Failure.Reason.KeySlotsDeclined, keySlots.peerName)
                 }
                 channel.send(Vector(ownVector))
             }

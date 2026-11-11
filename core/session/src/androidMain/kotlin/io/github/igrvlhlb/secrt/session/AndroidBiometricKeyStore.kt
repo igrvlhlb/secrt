@@ -45,11 +45,13 @@ import kotlin.coroutines.resumeWithException
  * So the file alone is useless, and so is the phone without the enrolled finger. Requires
  * Android 9: below that the support library falls back to a dialog that needs an AppCompat theme.
  *
- * Prompts are shown over the activity given to [attach].
+ * Prompts are shown over the activity given to [attach], with the texts [promptText] gives (the
+ * app passes them in the user's language: this module has no translations).
  */
 class AndroidBiometricKeyStore(
     private val context: Context,
     private val file: File = File(context.filesDir, "biometric.key"),
+    private val promptText: (Context, BiometricPurpose) -> BiometricPromptText = { _, purpose -> purpose.english },
 ) : BiometricKeyStore {
 
     private var activity = WeakReference<FragmentActivity>(null)
@@ -76,7 +78,7 @@ class AndroidBiometricKeyStore(
                 delete()
                 Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, generateKey(strongBox = true)) }
             }
-            val authorized = authenticate(cipher, "Turn on fingerprint unlock", "Confirm with your fingerprint", "Cancel")
+            val authorized = authenticate(cipher, BiometricPurpose.Enable)
             val iv = authorized.iv
             // Only after the prompt: the Keystore refuses every step of the operation, AAD included, until then.
             authorized.updateAAD(AAD)
@@ -86,7 +88,7 @@ class AndroidBiometricKeyStore(
             withContext(NonCancellable + Dispatchers.IO) { delete() }
             if (e is BiometricException || e is CancellationException) throw e
             Log.w(TAG, "Couldn't turn on biometric unlock", e)
-            throw BiometricException.Failed("Couldn't turn on fingerprint unlock")
+            throw BiometricException.Failed(BiometricException.Failed.Reason.EnableFailed)
         }
     }
 
@@ -102,19 +104,19 @@ class AndroidBiometricKeyStore(
                 throw invalidated()
             } catch (e: GeneralSecurityException) {
                 Log.w(TAG, "Couldn't load the biometric key", e)
-                throw BiometricException.Failed("Fingerprint unlock isn't working right now. Use your password.")
+                throw BiometricException.Failed(BiometricException.Failed.Reason.NotWorking)
             }
         }
-        val authorized = authenticate(cipher, "Unlock your diary", "Use your fingerprint", "Use password")
+        val authorized = authenticate(cipher, BiometricPurpose.Unlock)
         return try {
             authorized.updateAAD(AAD)
             authorized.doFinal(wrapped)
         } catch (e: AEADBadTagException) {
             // The file was damaged or doesn't match the key: nothing will ever decrypt it.
-            throw BiometricException.KeyInvalidated("Fingerprint unlock stopped working and was turned off. Use your password.")
+            throw BiometricException.KeyInvalidated(BiometricException.KeyInvalidated.Reason.Damaged)
         } catch (e: Exception) { // GeneralSecurityException, or the Keystore's ProviderException
             Log.w(TAG, "Couldn't decrypt with the biometric key", e)
-            throw BiometricException.Failed("Fingerprint unlock isn't working right now. Use your password.")
+            throw BiometricException.Failed(BiometricException.Failed.Reason.NotWorking)
         }
     }
 
@@ -127,9 +129,7 @@ class AndroidBiometricKeyStore(
         }
     }
 
-    private fun invalidated() = BiometricException.KeyInvalidated(
-        "Your fingerprints changed, so fingerprint unlock was turned off. Use your password, then turn it on again in Settings.",
-    )
+    private fun invalidated() = BiometricException.KeyInvalidated(BiometricException.KeyInvalidated.Reason.FingerprintsChanged)
 
     private fun generateKey(strongBox: Boolean): SecretKey {
         val spec = KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
@@ -159,7 +159,7 @@ class AndroidBiometricKeyStore(
         }
     }
 
-    private suspend fun authenticate(cipher: Cipher, title: String, subtitle: String, negative: String): Cipher =
+    private suspend fun authenticate(cipher: Cipher, purpose: BiometricPurpose): Cipher =
         withContext(Dispatchers.Main) {
             val host = activity.get()
                 ?.takeUnless { it.isFinishing || it.isDestroyed || it.supportFragmentManager.isStateSaved }
@@ -175,7 +175,7 @@ class AndroidBiometricKeyStore(
                             if (authorized != null) {
                                 continuation.resume(authorized)
                             } else {
-                                continuation.resumeWithException(BiometricException.Failed("Fingerprint unlock failed"))
+                                continuation.resumeWithException(BiometricException.Failed(BiometricException.Failed.Reason.PromptFailed))
                             }
                         }
 
@@ -186,10 +186,11 @@ class AndroidBiometricKeyStore(
                         // onAuthenticationFailed (a finger that doesn't match): the prompt stays up and says so.
                     },
                 )
+                val text = promptText(host, purpose)
                 val info = BiometricPrompt.PromptInfo.Builder()
-                    .setTitle(title)
-                    .setSubtitle(subtitle)
-                    .setNegativeButtonText(negative)
+                    .setTitle(text.title)
+                    .setSubtitle(text.subtitle)
+                    .setNegativeButtonText(text.negativeButton)
                     .setAllowedAuthenticators(BIOMETRIC_STRONG)
                     .setConfirmationRequired(false)
                     .build()
@@ -204,7 +205,7 @@ class AndroidBiometricKeyStore(
         BiometricPrompt.ERROR_CANCELED,
         -> BiometricException.Cancelled()
         BiometricPrompt.ERROR_NO_BIOMETRICS -> invalidated()
-        else -> BiometricException.Failed(message.toString())
+        else -> BiometricException.Failed(BiometricException.Failed.Reason.System, message.toString())
     }
 
     private fun keyStore(): KeyStore = KeyStore.getInstance(KEYSTORE).apply { load(null) }
