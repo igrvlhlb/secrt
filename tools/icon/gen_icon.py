@@ -1,25 +1,34 @@
 #!/usr/bin/env python3
-"""Generates the icon sketch SVG: a closed diary with a flat padlock, top-right corner disintegrating.
+"""Generates the app icon: a closed diary with a flat padlock, top-right corner disintegrating.
 
-usage: python3 tools/icon/gen_icon.py OUT.svg [seed]   (seed defaults to 5, the chosen sketch)
+usage: python3 tools/icon/gen_icon.py OUT.{svg,xml,kt} [seed] [feature ...]
+
+The output format follows the extension: .svg (preview), .xml (Android foreground drawable), .kt (desktop AppIcon).
+Seed defaults to 5. Features default to border + ribbon; others: strap, pages, all, none.
 """
 import math
+import os
 import random
 import sys
 
 OUT = sys.argv[1]
 SEED = int(sys.argv[2]) if len(sys.argv) > 2 else 5
+FEATURES = set(sys.argv[3:]) or {"border", "ribbon"}   # the chosen look; "none" turns all off
+if "all" in FEATURES:
+    FEATURES |= {"strap", "ribbon", "pages", "border"}
 
 INK = "#4A5C92"      # app primary / icon background
 PAPER = "#FBF8F3"    # app background / book cover
 SPINE_C = "#B8C5F0"  # spine band: a light tint of the ink
 TINT = "#DBE1FF"     # primaryContainer, for some of the flying chunks
+TAN = "#EDBD92"      # app secondary container: strap
+TAN_D = "#C98B5B"    # a darker tan: ribbon
 MID = "#9DAEE6"      # between ink and tint, for the farthest chunks
 
 # --- Book geometry (108x108 grid; Android adaptive-icon safe zone is the central 66x66) ---
 C = 2                          # cell size of the pixel grid
-X0, Y0 = 24, 31                # book top-left
 COLS, ROWS = 23, 27            # 46 x 54
+X0, Y0 = 54 - COLS * C // 2, 54 - ROWS * C // 2   # book centered on the tile; the dust may overflow
 X1, Y1 = X0 + COLS * C, Y0 + ROWS * C
 R = 4                          # radius of the three intact corners
 SPINE = 6                      # spine band width
@@ -135,7 +144,9 @@ def padlock():
     cx = X0 + SPINE + (X1 - X0 - SPINE) / 2     # center of the cover (right of the spine)
     cy = (Y0 + Y1) / 2
     bw, bh = 17, 14
-    bx, by = cx - bw / 2, cy - bh / 2 + 3.5
+    sr0 = (bw - 5) / 2
+    by = cy - (bh - 4 - sr0 - 3.0 / 2) / 2   # center the whole lock (shackle included) on the cover
+    bx = cx - bw / 2
     r = 2.6
     sw = 3.0
     sr = (bw - 5) / 2
@@ -146,32 +157,115 @@ def padlock():
             f"a{r},{r} 0 0 1 {r},{-r}z")
     kcy = by + 5.2
     key = f"M{fmt(cx)},{fmt(kcy - 2.1)}a2.1,2.1 0 0 1 1.1,3.9l0.8,3.2h-3.8l0.8,-3.2a2.1,2.1 0 0 1 1.1,-3.9z"
-    return top, sw, body, key
+    return top, sw, body, key, cx, by + bh / 2
+
+
+class Shape:
+    """One filled or stroked path of the icon, with the colors used by every output format."""
+
+    def __init__(self, name, d, fill=None, alpha=1.0, stroke=None, stroke_width=0.0):
+        self.name, self.d, self.fill, self.alpha = name, d, fill, alpha
+        self.stroke, self.stroke_width = stroke, stroke_width
+
+
+def shapes():
+    """The icon without its tile, back to front. Dust can overflow the 108x108 canvas on purpose."""
+    top, sw, body, key, lcx, lcy = padlock()
+    cl = X0 + SPINE + 3          # left of the cover's inner frame
+    out = []
+    if "ribbon" in FEATURES:     # bookmark ribbon: behind the book, only its tail shows below it
+        out.append(Shape("ribbon", f"M{X1 - 11},{Y1 - 10}h5v16l-2.5,-2.8l-2.5,2.8z", TAN_D))
+    out.append(Shape("cover", book_path(), PAPER))
+    out.append(Shape("spine", spine_path(), SPINE_C))
+    if "border" in FEATURES:     # thin inner frame that dissolves where the corner does
+        out.append(Shape("border", f"M{X1 - 24},{Y0 + 3}H{cl}V{Y1 - 3}H{X1 - 3}V{Y0 + 22}",
+                         stroke=SPINE_C, stroke_width=0.9))
+    if "pages" in FEATURES:      # page block seen along the bottom edge
+        for k in range(3):
+            out.append(Shape("pages", f"M{cl + 1},{fmt(Y1 - 6.5 + k * 1.6)}H{X1 - 4}",
+                             alpha=0.8, stroke=MID, stroke_width=0.7))
+    if "strap" in FEATURES:      # clasp strap wrapping around from the right edge to the lock
+        out.append(Shape("strap", f"M{fmt(lcx)},{fmt(lcy - 4.5)}H{X1}v9H{fmt(lcx)}z", TAN))
+        out.append(Shape("strap-seam", f"M{X1 - 3},{fmt(lcy - 4.5)}v9", stroke=TAN_D, stroke_width=0.8))
+    out.append(Shape("shackle", top, stroke=INK, stroke_width=sw))
+    out.append(Shape("lock", body, INK))
+    out.append(Shape("keyhole", key, PAPER))
+    for far, d, col, op in dust():
+        out.append(Shape("dust", d, col, op))
+    return out
+
+
+def svg_text():
+    p = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">',
+         '  <title>secrt icon: closed diary, padlock, disintegrating corner</title>',
+         f'  <rect width="108" height="108" rx="24" fill="{INK}"/>']
+    for sh in shapes():
+        a = ""
+        if sh.fill:
+            a += f' fill="{sh.fill}"'
+            if sh.alpha < 0.995:
+                a += f' fill-opacity="{fmt(sh.alpha)}"'
+        else:
+            a += ' fill="none"'
+        if sh.stroke:
+            a += f' stroke="{sh.stroke}" stroke-width="{fmt(sh.stroke_width)}"'
+            if sh.alpha < 0.995:
+                a += f' opacity="{fmt(sh.alpha)}"'
+        p.append(f'  <path id="{sh.name}" d="{sh.d}"{a}/>')
+    p.append('</svg>')
+    return "\n".join(p) + "\n"
+
+
+def android_text():
+    """res/drawable/ic_launcher_foreground.xml. The tile is the adaptive icon's @color/icon_background."""
+    p = ['<?xml version="1.0" encoding="utf-8"?>',
+         '<!-- Generated by tools/icon/gen_icon.py: a closed diary with a padlock, its corner turning to dust. -->',
+         '<vector xmlns:android="http://schemas.android.com/apk/res/android"',
+         '    android:width="108dp"', '    android:height="108dp"',
+         '    android:viewportWidth="108"', '    android:viewportHeight="108">']
+    for sh in shapes():
+        a = [f'android:pathData="{sh.d}"']
+        if sh.fill:
+            a.insert(0, f'android:fillColor="{sh.fill}"')
+            if sh.alpha < 0.995:
+                a.append(f'android:fillAlpha="{fmt(sh.alpha)}"')
+        if sh.stroke:
+            a += [f'android:strokeColor="{sh.stroke}"', f'android:strokeWidth="{fmt(sh.stroke_width)}"']
+            if sh.alpha < 0.995:
+                a.append(f'android:strokeAlpha="{fmt(sh.alpha)}"')
+        p.append("    <path\n        " + "\n        ".join(a) + " />")
+    p.append('</vector>')
+    return "\n".join(p) + "\n"
+
+
+def desktop_text():
+    """AppIcon.kt: the window icon, tile included (the desktop has no adaptive-icon layers)."""
+    p = ['package io.github.igrvlhlb.secrt.desktop', '',
+         'import androidx.compose.ui.graphics.Color',
+         'import androidx.compose.ui.graphics.SolidColor',
+         'import androidx.compose.ui.graphics.vector.ImageVector',
+         'import androidx.compose.ui.graphics.vector.addPathNodes',
+         'import androidx.compose.ui.unit.dp', '',
+         '/** The Android launcher icon (a diary with a padlock, its corner turning to dust), used as the window icon.',
+         ' *  Generated by tools/icon/gen_icon.py; do not edit by hand. */',
+         'val AppIcon: ImageVector = ImageVector.Builder("secrt", 108.dp, 108.dp, 108f, 108f)',
+         f'    .addPath(addPathNodes("M24,0h60a24,24 0,0 1,24 24v60a24,24 0,0 1,-24 24H24a24,24 0,0 1,-24 -24V24a24,24 0,0 1,24 -24z"), fill = SolidColor(Color(0xFF{INK[1:]})))']
+    for sh in shapes():
+        kw = []
+        if sh.fill:
+            kw.append(f'fill = SolidColor(Color(0xFF{sh.fill[1:]})), fillAlpha = {fmt(sh.alpha)}f')
+        if sh.stroke:
+            kw.append(f'stroke = SolidColor(Color(0xFF{sh.stroke[1:]})), strokeAlpha = {fmt(sh.alpha)}f, '
+                      f'strokeLineWidth = {fmt(sh.stroke_width)}f')
+        p.append(f'    .addPath(addPathNodes("{sh.d}"), {", ".join(kw)})')
+    p.append('    .build()')
+    return "\n".join(p) + "\n"
 
 
 def main():
-    top, sw, body, key = padlock()
-    p = []
-    p.append('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">')
-    p.append('  <title>secrt icon sketch: closed diary, padlock, disintegrating corner</title>')
-    p.append(f'  <rect width="108" height="108" rx="24" fill="{INK}"/>')
-    p.append('  <g id="diary">')
-    p.append(f'    <path d="{book_path()}" fill="{PAPER}"/>')
-    p.append(f'    <path d="{spine_path()}" fill="{SPINE_C}"/>')
-    p.append('  </g>')
-    p.append('  <g id="lock">')
-    p.append(f'    <path d="{top}" fill="none" stroke="{INK}" stroke-width="{sw}"/>')
-    p.append(f'    <path d="{body}" fill="{INK}"/>')
-    p.append(f'    <path d="{key}" fill="{PAPER}"/>')
-    p.append('  </g>')
-    p.append('  <g id="dust">')
-    for far, d, col, op in dust():
-        o = "" if op >= 0.995 else f' fill-opacity="{fmt(op)}"'
-        p.append(f'    <path d="{d}" fill="{col}"{o}/>')
-    p.append('  </g>')
-    p.append('</svg>')
+    text = {".svg": svg_text, ".xml": android_text, ".kt": desktop_text}[os.path.splitext(OUT)[1]]()
     with open(OUT, "w") as f:
-        f.write("\n".join(p) + "\n")
+        f.write(text)
 
 
 main()
