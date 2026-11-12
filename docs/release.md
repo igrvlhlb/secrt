@@ -89,3 +89,10 @@ Android, package `io.github.igrvlhlb.secrt`, or `io.github.igrvlhlb.secrt.debug`
 
 F-Droid builds don't use Google Play services (F-Droid takes no closed-source libraries), so they
 need another way to sign in to Google; see the backlog.
+
+## Privacy policy
+
+Play and Google's OAuth consent screen link to https://igrvlhlb.github.io/secrt/privacy.html. It
+lives on the `gh-pages` branch (only `privacy.html`), which GitHub Pages serves as is. To change
+it, commit to that branch and push; Pages republishes it in about a minute. Update it whenever
+secrt starts handling data differently (a new permission, service or kind of backup).
