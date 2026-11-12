@@ -7,6 +7,7 @@ The output format follows the extension: .svg (the whole icon: desktop window ic
 .xml (Android foreground layer).
 Seed defaults to 5. Features default to border + ribbon; others: strap, pages, all, none.
 "square" draws the tile without rounded corners, for the Google Play listing icon (Play rounds it itself).
+"banner" draws the 1024x500 Google Play feature graphic instead of the icon.
 """
 import math
 import os
@@ -16,7 +17,7 @@ import sys
 OUT = sys.argv[1]
 SEED = int(sys.argv[2]) if len(sys.argv) > 2 else 5
 FEATURES = set(sys.argv[3:])
-if not FEATURES - {"square"}:
+if not FEATURES - {"square", "banner"}:
     FEATURES |= {"border", "ribbon"}   # the chosen look; "none" turns all off
 if "all" in FEATURES:
     FEATURES |= {"strap", "ribbon", "pages", "border"}
@@ -199,10 +200,8 @@ def shapes():
     return out
 
 
-def svg_text():
-    p = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">',
-         '  <title>secrt icon: closed diary, padlock, disintegrating corner</title>',
-         f'  <rect width="108" height="108" rx="{0 if "square" in FEATURES else 24}" fill="{INK}"/>']
+def svg_paths(indent="  "):
+    p = []
     for sh in shapes():
         a = ""
         if sh.fill:
@@ -215,8 +214,32 @@ def svg_text():
             a += f' stroke="{sh.stroke}" stroke-width="{fmt(sh.stroke_width)}"'
             if sh.alpha < 0.995:
                 a += f' opacity="{fmt(sh.alpha)}"'
-        p.append(f'  <path id="{sh.name}" d="{sh.d}"{a}/>')
+        p.append(f'{indent}<path id="{sh.name}" d="{sh.d}"{a}/>')
+    return p
+
+
+def svg_text():
+    if "banner" in FEATURES:
+        return banner_text()
+    p = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">',
+         '  <title>secrt icon: closed diary, padlock, disintegrating corner</title>',
+         f'  <rect width="108" height="108" rx="{0 if "square" in FEATURES else 24}" fill="{INK}"/>']
+    p += svg_paths()
     p.append('</svg>')
+    return "\n".join(p) + "\n"
+
+
+def banner_text():
+    """Google Play feature graphic, 1024x500: the name on the left, the artwork on the right.
+    The text uses a system font, so render it on a machine that has Avenir Next (else it falls back)."""
+    p = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 500" width="1024" height="500">',
+         '  <title>secrt feature graphic</title>',
+         f'  <rect width="1024" height="500" fill="{INK}"/>',
+         f'  <text x="96" y="292" font-family="Avenir Next, Helvetica Neue, Arial, sans-serif" '
+         f'font-size="150" font-weight="600" letter-spacing="2" fill="{PAPER}">Secrt</text>',
+         '  <g transform="translate(500 14) scale(4.4)">']
+    p += svg_paths("    ")
+    p += ['  </g>', '</svg>']
     return "\n".join(p) + "\n"
 
 

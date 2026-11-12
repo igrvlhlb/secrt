@@ -45,7 +45,17 @@ rsvg-convert -w 512 -h 512 build/play-icon.svg -o build/play-icon-512.png
 magick build/play-icon-512.png -define png:color-type=6 build/play-icon-512.png   # force RGBA
 ```
 
-`build/` is ignored by git. Play also requires a 1024x500 feature graphic; that is not generated.
+`build/` is ignored by git.
+
+## Google Play feature graphic
+
+A 1024x500 banner: "Secrt" on the left, the artwork on the right. The text is a system font (Avenir
+Next, with fallbacks), so render it on a Mac, or the font will differ.
+
+```
+python3 tools/icon/gen_icon.py build/play-banner.svg 5 banner
+rsvg-convert -w 1024 -h 500 build/play-banner.svg -o build/play-feature-1024x500.png
+```
 
 ## Not generated yet
 
