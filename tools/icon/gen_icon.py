@@ -6,6 +6,7 @@ usage: python3 tools/icon/gen_icon.py OUT.{svg,xml} [seed] [feature ...]
 The output format follows the extension: .svg (the whole icon: desktop window icon, previews) and
 .xml (Android foreground layer).
 Seed defaults to 5. Features default to border + ribbon; others: strap, pages, all, none.
+"square" draws the tile without rounded corners, for the Google Play listing icon (Play rounds it itself).
 """
 import math
 import os
@@ -14,7 +15,9 @@ import sys
 
 OUT = sys.argv[1]
 SEED = int(sys.argv[2]) if len(sys.argv) > 2 else 5
-FEATURES = set(sys.argv[3:]) or {"border", "ribbon"}   # the chosen look; "none" turns all off
+FEATURES = set(sys.argv[3:])
+if not FEATURES - {"square"}:
+    FEATURES |= {"border", "ribbon"}   # the chosen look; "none" turns all off
 if "all" in FEATURES:
     FEATURES |= {"strap", "ribbon", "pages", "border"}
 
@@ -199,7 +202,7 @@ def shapes():
 def svg_text():
     p = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">',
          '  <title>secrt icon: closed diary, padlock, disintegrating corner</title>',
-         f'  <rect width="108" height="108" rx="24" fill="{INK}"/>']
+         f'  <rect width="108" height="108" rx="{0 if "square" in FEATURES else 24}" fill="{INK}"/>']
     for sh in shapes():
         a = ""
         if sh.fill:

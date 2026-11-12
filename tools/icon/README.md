@@ -34,9 +34,19 @@ details: `strap`, `pages`, `all`, `none`. Colors come from the app theme (`ui/th
 5. If the background color changed, update `icon_background` in
    `app/android/src/main/res/values/colors.xml` and the tile (`rect`) in the generator.
 
-## Other places that need an image
+## Google Play listing icon
 
-Not generated yet; render the `.svg` when you need them:
+Play wants a 512x512 32-bit sRGB PNG of at most 1024 KB, a full square with no rounded corners and
+no shadow (Play adds both). The `square` option draws the tile that way:
 
-- Google Play listing icon: 512x512 PNG. `rsvg-convert -w 512 -h 512 icon.svg -o icon.png`
-- Desktop installers (`.icns` for macOS, `.ico` for Windows): see [BACKLOG.md](../../BACKLOG.md).
+```
+python3 tools/icon/gen_icon.py build/play-icon.svg 5 square
+rsvg-convert -w 512 -h 512 build/play-icon.svg -o build/play-icon-512.png
+magick build/play-icon-512.png -define png:color-type=6 build/play-icon-512.png   # force RGBA
+```
+
+`build/` is ignored by git. Play also requires a 1024x500 feature graphic; that is not generated.
+
+## Not generated yet
+
+Desktop installers (`.icns` for macOS, `.ico` for Windows): see [BACKLOG.md](../../BACKLOG.md).
