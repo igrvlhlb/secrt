@@ -4,11 +4,10 @@
 > start with [docs/README.md](README.md).
 
 ## Context
-Greenfield project (repo holds only `idea.txt` + `AGENTS.md`). Goal: a private diary whose data lives
-encrypted on the user's own devices, with **no mandatory server cost**. Optional, user-triggered
-backup to the user's own cloud (Google Drive, OneDrive, home server). Built with Kotlin/Compose
-Multiplatform for Android, iOS, Desktop; web client postponed. Per `idea.txt`, settle the
-decisions and core architecture first, then features, then UI/UX.
+Goal: a private diary whose data lives encrypted on the user's own devices, with **no mandatory
+server cost**. Optional, user-triggered backup to the user's own cloud (Google Drive, OneDrive, home
+server). Built with Kotlin/Compose Multiplatform for Android, iOS, Desktop; web client postponed.
+The decisions and core architecture came first, then features, then UI/UX.
 
 ## Decisions (agreed)
 | Topic | Decision |
