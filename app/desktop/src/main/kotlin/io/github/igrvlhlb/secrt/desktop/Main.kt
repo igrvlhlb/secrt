@@ -6,7 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
@@ -50,7 +50,7 @@ fun main() {
             Window(
                 onCloseRequest = { open = false },
                 title = "secrt",
-                icon = rememberVectorPainter(AppIcon),
+                icon = painterResource("icon.svg"),
                 state = rememberWindowState(position = WindowPosition(Alignment.Center), width = 1000.dp, height = 720.dp),
             ) {
                 // Narrower than this, the phone layout starts to clip.

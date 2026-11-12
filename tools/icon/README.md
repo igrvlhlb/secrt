@@ -7,14 +7,13 @@ generated files by hand.
 The output format follows the extension of the file you give it:
 
 ```
-python3 tools/icon/gen_icon.py OUT.{svg,xml,kt} [seed] [feature ...]
+python3 tools/icon/gen_icon.py OUT.{svg,xml} [seed] [feature ...]
 ```
 
 | Extension | What it is | Goes to |
 |---|---|---|
-| `.svg` | The whole icon, tile included. For previewing. | anywhere (not committed) |
+| `.svg` | The whole icon, tile included. The desktop window icon, and the preview. | `app/desktop/src/main/resources/icon.svg` |
 | `.xml` | Android foreground layer (no tile: the tile is `@color/icon_background`). | `app/android/src/main/res/drawable/ic_launcher_foreground.xml` |
-| `.kt` | Desktop window icon, tile included. | `app/desktop/src/main/kotlin/io/github/igrvlhlb/secrt/desktop/AppIcon.kt` |
 
 `seed` (default 5) picks which chunks fly off and where. `feature`s (default `border ribbon`) add
 details: `strap`, `pages`, `all`, `none`. Colors come from the app theme (`ui/theme/Theme.kt`).
@@ -27,13 +26,13 @@ details: `strap`, `pages`, `all`, `none`. Colors come from the app theme (`ui/th
 3. Regenerate the two files the apps use:
    ```
    python3 tools/icon/gen_icon.py app/android/src/main/res/drawable/ic_launcher_foreground.xml
-   python3 tools/icon/gen_icon.py app/desktop/src/main/kotlin/io/github/igrvlhlb/secrt/desktop/AppIcon.kt
+   python3 tools/icon/gen_icon.py app/desktop/src/main/resources/icon.svg
    ```
 4. Build and look at it on a device: `./gradlew :app:android:assembleDebug :app:desktop:compileKotlin`.
    Launchers crop the adaptive icon; the dust is allowed to be cut off, but the diary and padlock
    must stay in the central 66x66 of the 108x108 canvas.
 5. If the background color changed, update `icon_background` in
-   `app/android/src/main/res/values/colors.xml` and the tile in the `.kt` output.
+   `app/android/src/main/res/values/colors.xml` and the tile (`rect`) in the generator.
 
 ## Other places that need an image
 
