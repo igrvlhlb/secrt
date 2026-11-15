@@ -8,6 +8,7 @@ import io.github.igrvlhlb.secrt.backup.BackupServerException.Action
 import io.github.igrvlhlb.secrt.backup.BackupTarget
 import io.github.igrvlhlb.secrt.backup.BackupTargetConfig
 import io.github.igrvlhlb.secrt.backup.InvalidServerAddressException
+import io.github.igrvlhlb.secrt.backup.PlainHttpNotLocalException
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.HttpClientEngineFactory
 import io.ktor.client.plugins.HttpTimeout
@@ -179,7 +180,11 @@ class WebDavTarget(
     }
 }
 
-/** `https://host/some/folder/`, with a trailing slash and without query or fragment. */
+/**
+ * `https://host/some/folder/`, with a trailing slash and without query or fragment.
+ *
+ * @throws PlainHttpNotLocalException for `http://` to a host outside the local network.
+ */
 internal fun normalizeFolderUrl(input: String): String {
     val text = input.trim().let { if ("://" in it) it else "https://$it" }
     val url = try {
@@ -189,9 +194,37 @@ internal fun normalizeFolderUrl(input: String): String {
     }
     require(url.protocol.name == "http" || url.protocol.name == "https") { "Only http and https are supported" }
     require(url.host.isNotEmpty()) { "Missing host" }
+    if (url.protocol.name == "http" && !isLocalNetworkHost(url.host)) throw PlainHttpNotLocalException()
     val path = url.encodedPath.ifEmpty { "/" }
     return url.protocolWithAuthority + path + if (path.endsWith("/")) "" else "/"
 }
+
+/**
+ * Whether [host] is on the local network, judged by how it is written (no DNS lookup): loopback,
+ * private and link-local IPv4 and IPv6 addresses, single-label names (`nas`) and the names home
+ * networks use (`.local`, `.lan`, `.home.arpa`, `.internal`, `.localhost`). Plain http is allowed
+ * only for these.
+ */
+internal fun isLocalNetworkHost(host: String): Boolean {
+    val h = host.lowercase().removePrefix("[").removeSuffix("]").removeSuffix(".")
+    if (h.isEmpty()) return false
+    val octets = h.split('.').map { it.toIntOrNull()?.takeIf { n -> n in 0..255 && it.length in 1..3 } }
+    if (octets.size == 4 && octets.all { it != null }) {
+        val (a, b) = octets.map { it!! }
+        return a == 10 || a == 127 || (a == 172 && b in 16..31) || (a == 192 && b == 168) || (a == 169 && b == 254)
+    }
+    if (':' in h) {
+        if (h == "::1") return true
+        val first = h.substringBefore(':').padStart(4, '0')
+        return first.startsWith("fc") || first.startsWith("fd") || // unique local, fc00::/7
+            first.length == 4 && first.startsWith("fe") && first[2] in "89ab" // link-local, fe80::/10
+    }
+    if (h.all { it.isDigit() || it == '.' }) return false // a malformed IPv4 address
+    if ('.' !in h) return true
+    return LOCAL_SUFFIXES.any { h.endsWith(it) }
+}
+
+private val LOCAL_SUFFIXES = listOf(".local", ".lan", ".home.arpa", ".internal", ".localhost")
 
 /**
  * Names of [requestPath]'s direct children among [entries] (both decoded paths), directories

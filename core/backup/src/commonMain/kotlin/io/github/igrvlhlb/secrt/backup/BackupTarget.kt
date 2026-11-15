@@ -90,6 +90,9 @@ class BackupServerException(
 /** What the user typed isn't a server address. */
 class InvalidServerAddressException : BackupException("That isn't a valid server address")
 
+/** A plain `http://` address outside the local network: its password would cross the internet unprotected. */
+class PlainHttpNotLocalException : BackupException("Plain http only works with servers on the local network. Use https for this one.")
+
 /** Another device changed the backup while this one was working on it. */
 class BackupChangedException : BackupException("The backup changed meanwhile. Try again.")
 

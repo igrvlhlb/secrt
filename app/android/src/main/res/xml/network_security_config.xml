@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain http is allowed so a WebDAV server on the local network works without setting up https.
+     Android can't limit this to private addresses, so secrt does: WebDavTarget refuses http to any
+     host outside the local network (isLocalNetworkHost), and the backup screen warns about http. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

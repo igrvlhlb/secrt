@@ -5,6 +5,7 @@ import io.github.igrvlhlb.secrt.backup.BackupNetworkException
 import io.github.igrvlhlb.secrt.backup.BackupServerException
 import io.github.igrvlhlb.secrt.backup.BackupTargetConfig
 import io.github.igrvlhlb.secrt.backup.Device
+import io.github.igrvlhlb.secrt.backup.PlainHttpNotLocalException
 import io.github.igrvlhlb.secrt.backup.draft
 import io.github.igrvlhlb.secrt.backup.titles
 import io.github.igrvlhlb.secrt.vault.Credential
@@ -113,6 +114,25 @@ class WebDavTargetTest {
         assertFailsWith<IllegalArgumentException> { normalizeFolderUrl("ftp://nas.local/") }
         assertFalse(BackupTargetConfig.WebDav("http://nas.local/", "u", "p").isEncryptedTransport)
         assertTrue(BackupTargetConfig.WebDav("HTTPS://nas.local/", "u", "p").isEncryptedTransport)
+    }
+
+    @Test
+    fun plainHttpOnlyReachesTheLocalNetwork() {
+        assertEquals("http://192.168.0.10:8080/dav/", normalizeFolderUrl("http://192.168.0.10:8080/dav"))
+        assertEquals("https://8.8.8.8/", normalizeFolderUrl("https://8.8.8.8"))
+        assertFailsWith<PlainHttpNotLocalException> { normalizeFolderUrl("http://cloud.example.com/") }
+        assertFailsWith<PlainHttpNotLocalException> { WebDavTarget(BackupTargetConfig.WebDav("http://8.8.8.8/", "u", "p")) }
+        val local = listOf(
+            "localhost", "nas", "nas.local", "NAS.LAN", "router.home.arpa", "box.internal", "app.localhost",
+            "10.0.0.2", "127.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.20", "169.254.3.4",
+            "::1", "[::1]", "fd12:3456::1", "fc00::1", "fe80::1", "febf::1",
+        )
+        val public = listOf(
+            "cloud.example.com", "local.example.com", "evil-lan.com", "8.8.8.8", "172.15.0.1", "172.32.0.1",
+            "192.169.0.1", "11.0.0.1", "999.1.1.1", "1.2.3", "2001:db8::1", "fec0::1", "fc::1", "",
+        )
+        local.forEach { assertTrue(isLocalNetworkHost(it), it) }
+        public.forEach { assertFalse(isLocalNetworkHost(it), it) }
     }
 
     @Test

@@ -309,6 +309,7 @@
     <string name="backup_action_delete">excluir %1$s</string>
     <string name="backup_action_create_folder">criar a pasta %1$s</string>
     <string name="error_backup_invalid_address">Esse não é um endereço de servidor válido</string>
+    <string name="error_backup_http_not_local">http sem criptografia só funciona com servidores da rede local. Use https para este.</string>
     <string name="error_backup_changed">O backup mudou nesse meio-tempo. Tente de novo.</string>
     <string name="error_backup_kept_password">Nada foi sincronizado: este dispositivo mantém a senha atual.</string>
     <string name="error_backup_not_found">Nenhum backup do secrt foi encontrado ali</string>

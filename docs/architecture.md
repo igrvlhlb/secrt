@@ -175,7 +175,12 @@ secrt/<vaultId>/
   1. WebDAV (done): Ktor with the OkHttp engine (Android and desktop), Basic auth, `PROPFIND`
      depth 1 / `GET` / `PUT` / `MKCOL` / `DELETE`. Given a bare server address it also tries
      Nextcloud/ownCloud's `/remote.php/dav/files/<user>/`; connecting writes and deletes a probe
-     file. Plain `http://` works but the UI warns that the server password is then unprotected.
+     file. Plain `http://` works only for hosts on the local network (`isLocalNetworkHost`:
+     private, loopback and link-local addresses, single-label names, `.local`, `.lan`,
+     `.home.arpa`, `.internal`), judged by how the address is written, without a DNS lookup; other
+     hosts get `PlainHttpNotLocalException`. The UI still warns that the server password is then
+     unprotected. Android allows cleartext app-wide (`res/xml/network_security_config.xml`) because
+     its config can't express address ranges, so this check is the real limit.
   2. Google Drive (done, `GoogleDriveTarget`), the way WhatsApp backs up: Drive's hidden
      `appDataFolder`, which only secrt can open (the user sees its size, and can delete it, under
      Drive › Settings › Manage apps). Scopes: `drive.appdata` and `userinfo.email` (to show the

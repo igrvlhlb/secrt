@@ -312,6 +312,7 @@
     <string name="backup_action_delete">delete %1$s</string>
     <string name="backup_action_create_folder">create the folder %1$s</string>
     <string name="error_backup_invalid_address">That isn't a valid server address</string>
+    <string name="error_backup_http_not_local">Plain http only works with servers on the local network. Use https for this one.</string>
     <string name="error_backup_changed">The backup changed meanwhile. Try again.</string>
     <string name="error_backup_kept_password">Nothing was synced: this device keeps its current password.</string>
     <string name="error_backup_not_found">No secrt backup was found there</string>

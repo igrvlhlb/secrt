@@ -11,6 +11,7 @@ import io.github.igrvlhlb.secrt.backup.BackupServerException
 import io.github.igrvlhlb.secrt.backup.InvalidServerAddressException
 import io.github.igrvlhlb.secrt.backup.KeySlotsChangeDeclinedException
 import io.github.igrvlhlb.secrt.backup.NoBackupFoundException
+import io.github.igrvlhlb.secrt.backup.PlainHttpNotLocalException
 import io.github.igrvlhlb.secrt.backup.drive.GoogleAuthException
 import io.github.igrvlhlb.secrt.backup.drive.GoogleDriveException
 import io.github.igrvlhlb.secrt.crypto.DecryptionException
@@ -48,6 +49,7 @@ fun Throwable.toUiText(fallback: UiText): UiText = when (this) {
     is BackupNetworkException -> detail?.let { text(Res.string.error_backup_unreachable_detail, it) } ?: text(Res.string.error_backup_unreachable)
     is BackupServerException -> toUiText()
     is InvalidServerAddressException -> text(Res.string.error_backup_invalid_address)
+    is PlainHttpNotLocalException -> text(Res.string.error_backup_http_not_local)
     is BackupChangedException -> text(Res.string.error_backup_changed)
     is KeySlotsChangeDeclinedException -> text(Res.string.error_backup_kept_password)
     is NoBackupFoundException -> text(Res.string.error_backup_not_found)
