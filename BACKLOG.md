@@ -81,7 +81,7 @@ Status: `[ ]` todo · `[~]` in progress · `[x]` done.
 ## Platforms
 - [x] Desktop (JVM) app module: window, file pickers, encrypted DB via `sqlite-jdbc-crypt`, restore from a phone backup
 - [x] Desktop: generate the pairing QR code
-- [ ] Desktop: sign and notarize the macOS app (today the `.dmg` is unsigned, so Gatekeeper blocks it); `.icns` icon
+- [ ] Desktop: sign and notarize the macOS app (today the `.dmg` is unsigned, so Gatekeeper blocks it)
 - [ ] Desktop: Windows/Linux packages built and tried on those OSes (declared, never built)
 - [ ] Desktop: RPM package for Linux (`TargetFormat.Rpm`; the build host needs `rpm-build`, so a Linux CI runner or machine)
 - [ ] Desktop: idle auto-lock while the window stays open; today it locks after being minimized for a

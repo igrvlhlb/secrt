@@ -27,7 +27,11 @@ details: `strap`, `pages`, `all`, `none`. Colors come from the app theme (`ui/th
    ```
    python3 tools/icon/gen_icon.py app/android/src/main/res/drawable/ic_launcher_foreground.xml
    python3 tools/icon/gen_icon.py app/desktop/src/main/resources/icon.svg
+   rsvg-convert -w 1024 -h 1024 app/desktop/src/main/resources/icon.svg -o app/desktop/src/main/resources/icon.png
    ```
+   The desktop app sets its Dock/taskbar icon from `icon.png` (`setTaskbarIcon` in `Main.kt`), so
+   that PNG is rendered from the SVG with `rsvg-convert`. Don't use ImageMagick's `magick` for this:
+   its built-in SVG renderer drops strokes (the padlock's shackle and the inner border on the cover).
 4. Build and look at it on a device: `./gradlew :app:android:assembleDebug :app:desktop:compileKotlin`.
    Launchers crop the adaptive icon; the dust is allowed to be cut off, but the diary and padlock
    must stay in the central 66x66 of the 108x108 canvas.
@@ -57,6 +61,20 @@ python3 tools/icon/gen_icon.py build/play-banner.svg 5 banner
 rsvg-convert -w 1024 -h 500 build/play-banner.svg -o build/play-feature-1024x500.png
 ```
 
-## Not generated yet
+## Desktop package icons
 
-Desktop installers (`.icns` for macOS, `.ico` for Windows): see [BACKLOG.md](../../BACKLOG.md).
+The installers use files in `app/desktop/packaging/`, made from the same SVG with `rsvg-convert`
+(the generator doesn't write them, and `magick`'s built-in renderer drops strokes, see above):
+
+```
+mkdir -p build/iconset && for s in 16 32 128 256 512; do
+  d=$((s*2)); rsvg-convert -w $s -h $s app/desktop/src/main/resources/icon.svg -o build/iconset/icon_${s}x${s}.png
+  rsvg-convert -w $d -h $d app/desktop/src/main/resources/icon.svg -o build/iconset/icon_${s}x${s}@2x.png
+done
+iconutil -c icns build/iconset -o app/desktop/packaging/secrt.icns          # macOS (.dmg, .app)
+for s in 16 32 48 64 128 256; do rsvg-convert -w $s -h $s app/desktop/src/main/resources/icon.svg -o build/ico-$s.png; done
+magick build/ico-16.png build/ico-32.png build/ico-48.png build/ico-64.png build/ico-128.png build/ico-256.png app/desktop/packaging/secrt.ico   # Windows (.msi)
+rsvg-convert -w 512 -h 512 app/desktop/src/main/resources/icon.svg -o app/desktop/packaging/secrt.png   # Linux (.deb)
+```
+
+Regenerate them whenever the icon changes, and commit them with it. `build/` is ignored by git.

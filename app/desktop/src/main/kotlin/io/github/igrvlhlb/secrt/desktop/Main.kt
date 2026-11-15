@@ -24,11 +24,13 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.awt.Desktop
 import java.awt.Dimension
+import java.awt.Taskbar
 import java.awt.desktop.QuitStrategy
 import java.awt.desktop.SystemSleepEvent
 import java.awt.desktop.SystemSleepListener
 import java.awt.desktop.UserSessionEvent
 import java.awt.desktop.UserSessionListener
+import javax.imageio.ImageIO
 import javax.swing.JOptionPane
 import kotlin.system.exitProcess
 
@@ -43,6 +45,7 @@ fun main() {
     val google = desktopGoogleSignIn()
     val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     integrateWithDesktop(session)
+    setTaskbarIcon()
 
     application {
         var open by remember { mutableStateOf(true) }
@@ -50,7 +53,8 @@ fun main() {
             Window(
                 onCloseRequest = { open = false },
                 title = "secrt",
-                icon = painterResource("icon.svg"),
+                // macOS shows no window icons, and the Dock's comes from the app bundle (or setTaskbarIcon).
+                icon = if (isMac) null else painterResource("icon.svg"),
                 state = rememberWindowState(position = WindowPosition(Alignment.Center), width = 1000.dp, height = 720.dp),
             ) {
                 // Narrower than this, the phone layout starts to clip.
@@ -67,6 +71,23 @@ fun main() {
             }
         }
     }
+}
+
+private val isMac = System.getProperty("os.name").orEmpty().startsWith("Mac")
+
+/**
+ * Sets the Dock (macOS) or taskbar icon when running unpackaged (`./gradlew :app:desktop:run`),
+ * where the Dock would otherwise show the Java launcher's icon. The packaged app (jpackage sets
+ * `jpackage.app-path`) keeps its bundle icon (`packaging/secrt.icns`): replacing it at runtime
+ * swaps the macOS-shaped icon for the flat PNG. Skipped where the OS doesn't allow changing it.
+ */
+private fun setTaskbarIcon() {
+    if (System.getProperty("jpackage.app-path") != null) return
+    if (!Taskbar.isTaskbarSupported()) return
+    val taskbar = Taskbar.getTaskbar()
+    if (!taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) return
+    val icon = ClassLoader.getSystemResourceAsStream("icon.png")?.use { ImageIO.read(it) } ?: return
+    taskbar.iconImage = icon
 }
 
 /**

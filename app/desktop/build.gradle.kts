@@ -97,7 +97,14 @@ compose.desktop {
                 // jpackage refuses a 0.x version on macOS.
                 packageVersion = "1.0.0"
                 dmgPackageVersion = "1.0.0"
+                iconFile.set(project.file("packaging/secrt.icns"))
                 // Not signed or notarized yet (see BACKLOG.md): Gatekeeper will block the app.
+            }
+            windows {
+                iconFile.set(project.file("packaging/secrt.ico"))
+            }
+            linux {
+                iconFile.set(project.file("packaging/secrt.png"))
             }
         }
     }
