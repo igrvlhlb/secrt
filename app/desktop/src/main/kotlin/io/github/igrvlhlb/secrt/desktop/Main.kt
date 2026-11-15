@@ -13,6 +13,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import io.github.igrvlhlb.secrt.session.AppSession
+import io.github.igrvlhlb.secrt.ui.AutoLock
 import io.github.igrvlhlb.secrt.ui.DesktopTexts
 import io.github.igrvlhlb.secrt.ui.SecrtApp
 import kotlinx.coroutines.CoroutineScope
@@ -44,6 +45,9 @@ fun main() {
     val lan = desktopLanSync(session, dataDirectory)
     val google = desktopGoogleSignIn()
     val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // Its own scope: closing the window stops the lifecycle, which starts the auto-lock timer, and
+    // the exit below must not wait for that timer as it waits for the final save.
+    val autoLock = AutoLock(session, CoroutineScope(SupervisorJob() + Dispatchers.Default))
     integrateWithDesktop(session)
     setTaskbarIcon()
 
@@ -59,7 +63,7 @@ fun main() {
             ) {
                 // Narrower than this, the phone layout starts to clip.
                 LaunchedEffect(Unit) { window.minimumSize = Dimension(400, 560) }
-                SecrtApp(session, backgroundScope, lan = lan, google = google)
+                SecrtApp(session, backgroundScope, autoLock = autoLock, lan = lan, google = google)
             }
         } else {
             LaunchedEffect(Unit) {
