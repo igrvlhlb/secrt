@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>secrt · Encrypted private diary</title>
+<meta name="description" content="secrt is a private diary for Android and computers. Everything is encrypted on your device, with optional encrypted backups to your own Google Drive or server.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root { --bg: #fdfcfa; --fg: #1f1d1a; --muted: #6b665f; --line: #e4e0d8; --link: #3557a8; --card: #f4f1ec; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #171614; --fg: #ebe7e0; --muted: #a29c92; --line: #34312c; --link: #9db4ec; --card: #211f1c; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, sans-serif; margin: 0; }
+  main { max-width: 46rem; margin: 0 auto; padding: 2rem 1rem 4rem; }
+  header { display: flex; align-items: center; gap: 1rem; margin-top: 1rem; }
+  header img { width: 72px; height: 72px; flex: none; }
+  h1 { font-size: 2rem; margin: 0; }
+  .tagline { color: var(--muted); margin: .1rem 0 0; font-size: 1.05rem; }
+  h2 { font-size: 1.2rem; margin-top: 2.2rem; }
+  a { color: var(--link); }
+  nav { margin: 0 0 1.5rem; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .3rem 0; }
+  .shots { display: flex; gap: .75rem; margin: 1.8rem 0 .5rem; }
+  .shots img { width: calc((100% - 1.5rem) / 3); height: auto; border-radius: 12px; border: 1px solid var(--line); }
+  .box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: .2rem 1.2rem .6rem; }
+  footer { color: var(--muted); font-size: .95rem; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 3rem 0; }
+</style>
+</head>
+<body>
+<main>
+
+<nav><a href="#en">English</a> · <a href="#pt-br">Português (Brasil)</a></nav>
+
+<section id="en" lang="en">
+<header>
+  <img src="icon.svg" alt="secrt icon">
+  <div>
+    <h1>secrt</h1>
+    <p class="tagline">A private diary that stays yours.</p>
+  </div>
+</header>
+
+<p>secrt is a diary app for Android and computers. Everything you write is encrypted on your device
+with a key only your password can unlock. There are no accounts, no servers of ours, no ads and no
+tracking: your diary lives on your devices, and goes elsewhere only when you ask.</p>
+
+<div class="shots">
+  <img src="img/en-02-list.png" alt="The diary's list of entries">
+  <img src="img/en-03-entry.png" alt="Reading an entry">
+  <img src="img/en-04-editor.png" alt="Editing an entry">
+</div>
+
+<h2>What it does</h2>
+<ul>
+  <li><strong>Write freely.</strong> Entries in Markdown, with photos and files attached, organized
+  in folders and labels.</li>
+  <li><strong>Find anything.</strong> Full-text search across titles and entries, even though it's all
+  encrypted.</li>
+  <li><strong>Encrypted by default.</strong> The whole diary, including titles, folders and labels, is
+  stored in an encrypted database. Optional fingerprint or face unlock, and a recovery key in case
+  you forget your password.</li>
+  <li><strong>Back up where you choose.</strong> Encrypted backups to your own Google Drive or to your
+  own server (WebDAV, such as Nextcloud), or to an encrypted file.</li>
+  <li><strong>Sync your devices.</strong> Pair your phone and computer with a QR code and sync directly
+  over your local network, with no cloud in between.</li>
+</ul>
+
+<h2>How secrt uses your Google account</h2>
+<div class="box">
+<p>Connecting a Google account is optional, and only needed to back up to Google Drive. When you do,
+secrt asks for:</p>
+<ul>
+  <li><strong>Access to its own app folder in your Google Drive</strong> (<code>drive.appdata</code>),
+  to save and restore your encrypted backup there. secrt can't see or change any of your other
+  files.</li>
+  <li><strong>Your email address</strong>, only to show you which account is connected.</li>
+</ul>
+<p>The backup is encrypted on your device before it is uploaded, so neither Google nor we can read
+it. Nothing is sent to us. secrt's use of information received from Google APIs adheres to the
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+including the Limited Use requirements. See the <a href="privacy.html">privacy policy</a> for the
+details.</p>
+</div>
+
+<h2>More</h2>
+<ul>
+  <li><a href="privacy.html">Privacy policy</a></li>
+  <li><a href="https://github.com/igrvlhlb/secrt">Source code on GitHub</a></li>
+  <li>Contact: <a href="mailto:secrt.app@protonmail.com">secrt.app@protonmail.com</a></li>
+</ul>
+</section>
+
+<hr>
+
+<section id="pt-br" lang="pt-BR">
+<header>
+  <img src="icon.svg" alt="Ícone do secrt">
+  <div>
+    <h1>secrt</h1>
+    <p class="tagline">Um diário privado que continua só seu.</p>
+  </div>
+</header>
+
+<p>O secrt é um app de diário para Android e computadores. Tudo o que você escreve é criptografado
+no seu aparelho, com uma chave que só a sua senha abre. Não há contas, servidores nossos, anúncios
+nem rastreamento: o diário fica nos seus aparelhos e só vai para outro lugar quando você pede.</p>
+
+<div class="shots">
+  <img src="img/pt-02-list.png" alt="A lista de registros do diário">
+  <img src="img/pt-03-entry.png" alt="Lendo um registro">
+  <img src="img/pt-04-editor.png" alt="Editando um registro">
+</div>
+
+<h2>O que ele faz</h2>
+<ul>
+  <li><strong>Escreva à vontade.</strong> Registros em Markdown, com fotos e arquivos anexados,
+  organizados em pastas e etiquetas.</li>
+  <li><strong>Encontre qualquer coisa.</strong> Busca em todo o texto dos títulos e registros, mesmo
+  com tudo criptografado.</li>
+  <li><strong>Criptografado por padrão.</strong> O diário inteiro, incluindo títulos, pastas e
+  etiquetas, fica num banco de dados criptografado. Desbloqueio por digital ou rosto opcional, e uma
+  chave de recuperação caso você esqueça a senha.</li>
+  <li><strong>Backup onde você escolher.</strong> Backups criptografados no seu próprio Google Drive,
+  no seu próprio servidor (WebDAV, como o Nextcloud) ou num arquivo criptografado.</li>
+  <li><strong>Sincronize seus aparelhos.</strong> Pareie o celular e o computador com um QR code e
+  sincronize direto pela sua rede local, sem nuvem no meio.</li>
+</ul>
+
+<h2>Como o secrt usa sua conta Google</h2>
+<div class="box">
+<p>Conectar uma conta Google é opcional e só é preciso para fazer backup no Google Drive. Quando você
+conecta, o secrt pede:</p>
+<ul>
+  <li><strong>Acesso à pasta do próprio app no seu Google Drive</strong> (<code>drive.appdata</code>),
+  para salvar e restaurar ali o seu backup criptografado. O secrt não vê nem altera nenhum outro
+  arquivo seu.</li>
+  <li><strong>Seu endereço de email</strong>, só para mostrar qual conta está conectada.</li>
+</ul>
+<p>O backup é criptografado no seu aparelho antes de ser enviado, então nem o Google nem nós
+conseguimos lê-lo. Nada é enviado para nós. O uso que o secrt faz das informações recebidas das APIs
+do Google segue a
+<a href="https://developers.google.com/terms/api-services-user-data-policy">Política de dados do usuário dos serviços de API do Google</a>,
+incluindo os requisitos de uso limitado. Veja os detalhes na
+<a href="privacy.html#pt-br">política de privacidade</a>.</p>
+</div>
+
+<h2>Mais</h2>
+<ul>
+  <li><a href="privacy.html#pt-br">Política de privacidade</a></li>
+  <li><a href="https://github.com/igrvlhlb/secrt">Código-fonte no GitHub</a></li>
+  <li>Contato: <a href="mailto:secrt.app@protonmail.com">secrt.app@protonmail.com</a></li>
+</ul>
+</section>
+
+<hr>
+<footer><p>secrt · Igor A. Vilhalba · <a href="privacy.html">Privacy policy / Política de privacidade</a></p></footer>
+
+</main>
+</body>
+</html>
