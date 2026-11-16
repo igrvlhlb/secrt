@@ -96,3 +96,47 @@ Play and Google's OAuth consent screen link to https://igrvlhlb.github.io/secrt/
 lives on the `gh-pages` branch (only `privacy.html`), which GitHub Pages serves as is. To change
 it, commit to that branch and push; Pages republishes it in about a minute. Update it whenever
 secrt starts handling data differently (a new permission, service or kind of backup).
+
+# Releasing the desktop app
+
+```
+./gradlew :app:desktop:packageReleaseDistributionForCurrentOS
+```
+
+builds the installer for the OS it runs on (`.dmg` on macOS, `.msi` on Windows, `.deb` on Linux)
+into `app/desktop/build/compose/binaries/main-release/`. jpackage can't build for another OS, so
+each installer is made on its own OS. The macOS app isn't signed or notarized yet (see the
+backlog), so Gatekeeper blocks it until the user allows it in System Settings.
+
+"Release" only adds a ProGuard step that drops unused classes before packaging: the macOS app
+goes from about 200 MB to 145 MB. Nothing else differs from `packageDistributionForCurrentOS`
+(no debug mode, same signing). Names aren't obfuscated, and ProGuard's optimizer is off
+(`optimize.set(false)`): it rewrote Okio's methods into bytecode the JVM rejects
+(`VerifyError: Bad return type`), and saved only about 3 MB.
+
+## The runtime JDK
+
+The app runs on, and bundles, Temurin 21 (`desktopRuntime` in `app/desktop/build.gradle.kts`);
+Gradle downloads it when the machine has no copy. Stay on a JDK that ships `jmods/`: ProGuard reads
+the JDK's own classes from there. From JDK 24 on, Temurin leaves them out (JEP 493), and ProGuard
+then can't resolve even `java.lang.Object`, failing with hundreds of thousands of warnings. Moving
+to a newer JDK means picking a vendor whose JDK still has `jmods/`, and adding to `modules(...)`
+whatever the new JDK moved (on 21, TLS needs `jdk.crypto.ec`).
+
+## Keep rules
+
+`app/desktop/proguard-rules.pro` keeps what ProGuard can't see being used: code reached through
+reflection, JNI, JNA or ServiceLoader (libsodium via JNA, the SQLite driver), and silences
+references to optional libraries the app doesn't ship (OkHttp's extra TLS providers). They only
+change when such a library is added. A missing keep rule doesn't fail the build; the packaged app
+crashes when it first reaches that code. So before publishing, try the release package against a
+throwaway diary:
+
+```
+open -n --env "JAVA_TOOL_OPTIONS=-Dsecrt.dataDir=/tmp/secrt-try" \
+  app/desktop/build/compose/binaries/main-release/app/secrt.app
+```
+
+and go through: create a diary (with a recovery key), write an entry with Markdown and an
+attachment, preview it, search, lock and unlock, export and import a `.secrt` file, connect a
+WebDAV backup and back up, sign in to Google Drive, pair with a phone over the LAN, and quit.

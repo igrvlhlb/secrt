@@ -33,7 +33,11 @@ pending. If a `private-docs/` folder exists, read it too: it holds the maintaine
 - Every text the user sees goes in both `strings.xml` files (English and `values-pt-rBR`).
   `StringsTest` fails otherwise. Errors from `core/*` are typed exceptions mapped to texts in
   `ui/text/ErrorMessages.kt`; see "Languages" in docs/architecture.md.
-- The release build is shrunk by R8. After adding a library that uses reflection, JNI or JNA, add
-  its keep rules to `app/android/proguard-rules.pro` if it ships none, and try a release build on a
-  device (docs/release.md explains how to install one next to the real app).
+- Release builds are shrunk: Android by R8, the desktop by ProGuard. After adding a library that
+  uses reflection, JNI, JNA or ServiceLoader, add its keep rules to `app/android/proguard-rules.pro`
+  if it ships none and to `app/desktop/proguard-rules.pro` (ProGuard doesn't read the rules
+  libraries ship for R8). Then try both release builds: on a device (docs/release.md explains how to
+  install one next to the real app) and the packaged desktop app against a throwaway diary.
+- The desktop runs on Temurin 21. Don't move it to a JDK without `jmods/` (Temurin 24+): the desktop
+  release build needs them (see docs/release.md).
 - Keep docs and `BACKLOG.md` up to date in the same commit as the change.

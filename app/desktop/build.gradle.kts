@@ -15,10 +15,17 @@ kotlin {
  * JDK the desktop app runs on and bundles. Our code still compiles for Java 17, but some
  * dependencies don't (the Markdown renderer ships Java 21 bytecode), so the runtime must be newer.
  * The packaged app carries its own runtime, so users never need a JDK installed.
+ *
+ * Temurin 21, the same on every machine (downloaded by the foojay resolver when missing). Not 24+:
+ * from 24 on, Temurin ships without `jmods/` (JEP 493), which the release build's ProGuard step
+ * reads the JDK's own classes from. See docs/release.md.
  */
-val desktopRuntime = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+val desktopRuntime = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(21)
+    vendor = JvmVendorSpec.ADOPTIUM
+}
 
-// JNA (libsodium) and the SQLite driver load native code; JDK 24+ warns unless this is allowed.
+// JNA (libsodium) and the SQLite driver load native code; newer JDKs warn unless this is allowed.
 val desktopJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 
 dependencies {
@@ -81,6 +88,15 @@ compose.desktop {
         // `./gradlew :app:desktop:run -Psecrt.dataDir=/some/dir` runs against a throwaway diary.
         providers.gradleProperty("secrt.dataDir").orNull?.let { jvmArgs("-Dsecrt.dataDir=$it") }
 
+        // `packageRelease*` shrinks the jars with ProGuard first. Libraries that use reflection, JNI
+        // or JNA need keep rules there; a missing one only fails when the packaged app runs.
+        // Shrinking only: ProGuard's optimizer rewrote Okio's return types into bytecode the JVM
+        // rejects (VerifyError: Bad return type), and it saves little next to shrinking.
+        buildTypes.release.proguard {
+            configurationFiles.from(project.file("proguard-rules.pro"))
+            optimize.set(false)
+        }
+
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "secrt"
@@ -89,8 +105,8 @@ compose.desktop {
             // The bundled runtime only has the JDK modules listed here (from `suggestRuntimeModules`):
             // JDBC for the database, jdk.unsupported for JNA (libsodium). java.management is listed
             // since the HTTP client for cloud backup joined; a spare module is cheap, a missing one
-            // only fails at runtime. TLS needs nothing extra (the EC crypto lives in java.base since JDK 22).
-            modules("java.instrument", "java.management", "java.sql", "jdk.unsupported")
+            // only fails at runtime. jdk.crypto.ec: TLS key exchange on JDK 21 (it moved into java.base in 22).
+            modules("java.instrument", "java.management", "java.sql", "jdk.crypto.ec", "jdk.unsupported")
 
             macOS {
                 bundleID = "io.github.igrvlhlb.secrt"
